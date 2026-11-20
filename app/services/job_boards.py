@@ -1,16 +1,31 @@
 import asyncio
 import hashlib
 import json
+import os
 import re
 import sys
+import time
 import unicodedata
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import quote_plus, urljoin
 from bs4 import BeautifulSoup, Tag
 import httpx
 from app.database import db_session
 from app.services.distance import estimate_commute, geocode_location
 from app.services.scraper import _is_agency, _looks_like_job
+
+MPSV_DATA_URL = "https://data.mpsv.cz/od/soubory/volna-mista/volna-mista.json.gz"
+MPSV_CACHE_PATH = "/tmp/mpsv_volna_mista.json"
+MPSV_CACHE_TTL_SEC = 6 * 3600
+
+OKRES_ID_MAP = {
+    "Okres/3807": "Karviná",
+    "Okres/3808": "Ostrava",
+    "Okres/3806": "Frýdek-Místek",
+    "Okres/3809": "Opava",
+    "Okres/3805": "Bruntál",
+    "Okres/3810": "Nový Jičín",
+}
 
 SEARCH_TERMS = [
     "údržba",
@@ -47,9 +62,13 @@ DISTANT_CITIES = [
     "tábor",
     "přerov",
     "vsetín",
+    "cheb",
+    "prostějov",
+    "králíky",
+    "bystřec",
 ]
 
-BOARD_NAMES = {"jobs.cz", "prace.cz", "jenprace.cz"}
+BOARD_NAMES = {"jobs.cz", "prace.cz", "jenprace.cz", "linkedin.com", "uradprace.cz"}
 
 NOISE_COMPANY_PATTERNS = re.compile(
     r"^(?:"
@@ -125,13 +144,13 @@ def _extract_explicit_locality(text: str) -> Optional[str]:
         return None
     m = re.search(
         r"(?:Lokalita|M[íi]sto\s+pracovi[šs]t[ěe]|M[íi]sto\s+v[ýy]konu\s+pr[áa]ce|Obec|M[ěe]sto)\s*:\s*"
-        r"([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^\n|]{1,50}?)"
-        r"(?=\s+(?:N[áa]zev\s+firmy|Zam[ěe]stnavatel|Spole[čc]nost|Typ\s+[úu]vazku|Mzda|Plat|Sm[ěe]ny|Aktualizov[áa]no|P[řr]id[áa]no)\b|$)",
+        r"([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^\n|]{1,70}?)"
+        r"(?=\s*\.\s*(?:Mzda|Plat|Sm[ěe]ny|Lokalita)\b|\s+(?:N[áa]zev\s+firmy|Zam[ěe]stnavatel|Spole[čc]nost|Typ\s+[úu]vazku|Mzda|Plat|Sm[ěe]ny|Aktualizov[áa]no|P[řr]id[áa]no)\b|$)",
         text,
     )
     if not m:
         return None
-    cand = re.sub(r"\s*[-–]\s*.*$", "", m.group(1)).strip(" ,.")
+    cand = re.sub(r"\s*[-–].*$", "", m.group(1)).strip(" ,.")
     if len(cand) < 2 or cand.lower() in {"česká republika", "czechia", "celá čr", "moravskoslezský kraj"}:
         return None
     return cand
@@ -375,7 +394,217 @@ def _build_board_urls(board: str, location: str, term: str) -> List[str]:
             f"https://www.jenprace.cz/nabidky/{loc_slug}?query={term_q}",
             f"https://www.jenprace.cz/nabidky?query={term_q}&location={loc_q}",
         ]
+    if board == "linkedin.com":
+        return [
+            f"https://www.linkedin.com/jobs/search/?keywords={term_q}&location={loc_q}",
+        ]
+    if board == "uradprace.cz":
+        return [
+            f"https://up.gov.cz/volna-mista-v-cr?query={term_q}&location={loc_q}",
+        ]
     return []
+
+
+def _download_mpsv_sync(tmp_download: str) -> None:
+    with httpx.Client(timeout=180.0, follow_redirects=True, verify=False) as client:
+        with client.stream("GET", MPSV_DATA_URL) as resp:
+            resp.raise_for_status()
+            with open(tmp_download, "wb") as out_f:
+                for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                    if chunk:
+                        out_f.write(chunk)
+
+
+async def _ensure_mpsv_dataset() -> Optional[str]:
+    try:
+        if os.path.exists(MPSV_CACHE_PATH):
+            age = time.time() - os.path.getmtime(MPSV_CACHE_PATH)
+            if age < MPSV_CACHE_TTL_SEC and os.path.getsize(MPSV_CACHE_PATH) > 100_000:
+                return MPSV_CACHE_PATH
+    except Exception:
+        pass
+
+    tmp_download = f"{MPSV_CACHE_PATH}.part"
+    try:
+        await asyncio.to_thread(_download_mpsv_sync, tmp_download)
+        os.replace(tmp_download, MPSV_CACHE_PATH)
+        return MPSV_CACHE_PATH
+    except Exception as exc:
+        _log(f"Nepodařilo se stáhnout otevřená data MPSV: {type(exc).__name__}: {_sanitize_err(exc)}")
+        try:
+            if os.path.exists(tmp_download):
+                os.remove(tmp_download)
+        except Exception:
+            pass
+        return MPSV_CACHE_PATH if os.path.exists(MPSV_CACHE_PATH) else None
+
+
+def _iter_mpsv_polozky(file_path: str) -> Iterator[Dict[str, Any]]:
+    started_array = False
+    in_string = False
+    escape = False
+    depth = 0
+    buf: List[str] = []
+    tail = ""
+
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            for ch in chunk:
+                if not started_array:
+                    tail = (tail + ch)[-64:]
+                    if '"polozky"' in tail and ch == "[":
+                        started_array = True
+                    continue
+
+                if depth == 0:
+                    if ch == "]":
+                        return
+                    if ch == "{":
+                        depth = 1
+                        in_string = False
+                        escape = False
+                        buf = [ch]
+                    continue
+
+                buf.append(ch)
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if not in_string:
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            raw_obj = "".join(buf)
+                            buf = []
+                            try:
+                                parsed = json.loads(raw_obj)
+                                if isinstance(parsed, dict):
+                                    yield parsed
+                            except Exception:
+                                continue
+
+
+def _extract_mpsv_str(val: Any, lang: str = "cs") -> str:
+    if isinstance(val, dict):
+        if lang in val and val[lang]:
+            return str(val[lang]).strip()
+        for v in val.values():
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return ""
+    if isinstance(val, str):
+        return val.strip()
+    return ""
+
+
+def _extract_mpsv_locality(row: Dict[str, Any]) -> str:
+    mv_prace = row.get("mistoVykonuPrace") if isinstance(row.get("mistoVykonuPrace"), dict) else {}
+
+    pracoviste = mv_prace.get("pracoviste")
+    if isinstance(pracoviste, list):
+        for p in pracoviste:
+            if not isinstance(p, dict):
+                continue
+            addr = p.get("adresa") if isinstance(p.get("adresa"), dict) else {}
+            psc = str(addr.get("psc") or "").strip()
+            ulice_obj = addr.get("ulice") if isinstance(addr.get("ulice"), dict) else {}
+            ulice = str(ulice_obj.get("nazev") or "").strip()
+            dodatek = str(p.get("dodatekAdresy") or addr.get("dodatekAdresy") or "").strip()
+            p_nazev = str(p.get("nazev") or "").strip()
+
+            # Zkusíme z dodatku nebo názvu vytáhnout část s PSČ a obcí (např. "561 69 Králíky")
+            m_psc_city = re.search(r"\b([1-7]\d{2}\s?\d{2})\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+)?)", f"{dodatek} {p_nazev}")
+            if m_psc_city:
+                return f"{m_psc_city.group(1)} {m_psc_city.group(2)}"
+
+            parts = [x for x in (ulice, psc) if x]
+            if parts:
+                return " ".join(parts)
+
+            okres_obj = addr.get("okres") if isinstance(addr.get("okres"), dict) else {}
+            ok_id = str(okres_obj.get("id") or "").strip()
+            if ok_id in OKRES_ID_MAP:
+                return OKRES_ID_MAP[ok_id]
+
+    okresy = mv_prace.get("okresy")
+    if isinstance(okresy, list):
+        for ok in okresy:
+            if isinstance(ok, dict):
+                ok_id = str(ok.get("id") or "").strip()
+                if ok_id in OKRES_ID_MAP:
+                    return OKRES_ID_MAP[ok_id]
+
+    return ""
+
+
+async def _fetch_mpsv_offers(term: str, location: str, limit: int = 25) -> List[Dict[str, str]]:
+    path = await _ensure_mpsv_dataset()
+    if not path:
+        return []
+
+    term_low = (term or "").strip().lower()
+    items: List[Dict[str, str]] = []
+
+    for row in _iter_mpsv_polozky(path):
+        title = _extract_mpsv_str(row.get("pozadovanaProfese"))
+        if not title:
+            continue
+
+        emp = row.get("zamestnavatel") if isinstance(row.get("zamestnavatel"), dict) else {}
+        company_name = str(emp.get("nazev") or "").strip() or "uradprace.cz"
+
+        info = _extract_mpsv_str(row.get("upresnujiciInformace"))
+        lok_val = _extract_mpsv_locality(row)
+
+        mzda_od = row.get("mesicniMzdaOd")
+        mzda_do = row.get("mesicniMzdaDo")
+        mzda_txt = ""
+        if mzda_od is not None and mzda_do is not None:
+            mzda_txt = f"Mzda: {mzda_od}–{mzda_do} Kč. "
+        elif mzda_od is not None:
+            mzda_txt = f"Mzda od: {mzda_od} Kč. "
+
+        lok_txt = f"Lokalita: {lok_val}. " if lok_val else ""
+        desc = f"{lok_txt}{mzda_txt}{info}".strip() or title
+
+        haystack = f"{title} {company_name} {lok_val} {desc}".lower()
+        if term_low and term_low not in haystack:
+            continue
+        if _has_distant_city(f"{lok_val} {desc}"):
+            continue
+
+        portal_id = row.get("portalId")
+        raw_url = str(row.get("urlAdresa") or "").strip()
+        if raw_url.startswith("http"):
+            offer_url = raw_url
+        elif portal_id:
+            offer_url = f"https://up.gov.cz/volna-mista-v-cr#/volna-mista-detail/{portal_id}"
+        else:
+            ref_no = str(row.get("referencniCislo") or "").strip()
+            offer_url = f"https://up.gov.cz/volna-mista-v-cr?query={quote_plus(ref_no or title)}"
+
+        items.append({
+            "board_name": "uradprace.cz",
+            "company_name": company_name[:160],
+            "title": title[:160],
+            "url": offer_url[:500],
+            "description": desc[:1500],
+        })
+        if len(items) >= limit:
+            break
+
+    return items
 
 
 def _parse_json_ld(soup: BeautifulSoup, base_url: str, default_board: str) -> List[Dict[str, str]]:
@@ -462,7 +691,8 @@ async def _fetch_html(url: str) -> Tuple[str, str]:
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.7",
     }
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+    verify_ssl = "uradprace.cz" not in url.lower() and "up.gov.cz" not in url.lower()
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=verify_ssl) as client:
         for attempt in range(3):
             resp = await client.get(url, headers=headers)
             if resp.status_code in (500, 502, 503, 504) and attempt < 2:
@@ -560,6 +790,10 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                 enabled_boards.append("prace.cz")
             if profile.get("use_jenprace_cz"):
                 enabled_boards.append("jenprace.cz")
+            if profile.get("use_linkedin"):
+                enabled_boards.append("linkedin.com")
+            if profile.get("use_uradprace_cz"):
+                enabled_boards.append("uradprace.cz")
 
         if not enabled_boards:
             _log("Žádný pracovní portál není povolen.")
@@ -582,20 +816,34 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
         for term in SEARCH_TERMS:
             raw_items: List[Dict[str, str]] = []
             last_err: Optional[Exception] = None
-            urls = _build_board_urls(board, home_location, term)
-            for idx, url in enumerate(urls):
+
+            if board == "uradprace.cz":
                 stats["boards_queried"] += 1
                 try:
-                    raw_items = await _fetch_board_search(board, url)
-                    last_err = None
-                    break
+                    raw_items = await _fetch_mpsv_offers(term, home_location)
                 except Exception as exc:
                     last_err = exc
-                    if idx < len(urls) - 1:
-                        continue
+            else:
+                urls = _build_board_urls(board, home_location, term)
+                for idx, url in enumerate(urls):
+                    stats["boards_queried"] += 1
+                    try:
+                        raw_items = await _fetch_board_search(board, url)
+                        last_err = None
+                        break
+                    except Exception as exc:
+                        last_err = exc
+                        if idx < len(urls) - 1:
+                            continue
+
+            if board == "linkedin.com":
+                await asyncio.sleep(6.0)
             if last_err is not None and not raw_items:
                 stats["errors"] += 1
                 _log(f"Chyba u {board} ({term}): {type(last_err).__name__}: {_sanitize_err(last_err)}")
+                if board == "linkedin.com" and isinstance(last_err, httpx.HTTPStatusError) and last_err.response.status_code == 429:
+                    _log("LinkedIn vrátil 429 (rate limit), přeskakuji zbývající dotazy pro LinkedIn v tomto běhu.")
+                    break
                 continue
 
             for item in raw_items:
@@ -604,7 +852,7 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
 
                 if "jenprace.cz/nabidky/" in offer_url.lower() and "/nabidka/" not in offer_url.lower():
                     continue
-                if not _looks_like_job(title, offer_url, offer_url):
+                if board != "uradprace.cz" and not _looks_like_job(title, offer_url, offer_url):
                     continue
 
                 u_low = offer_url.lower()

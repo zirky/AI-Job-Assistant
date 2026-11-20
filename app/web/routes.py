@@ -36,6 +36,7 @@ def _normalize_geo_query(city: str) -> str:
 async def jobs_page(
     request: Request,
     filter_status: str = "all",
+    show_low: int = 0,
     checked: int = 0,
     added: int = 0,
     board_added: int = 0,
@@ -44,6 +45,12 @@ async def jobs_page(
 ):
     with db_session() as conn:
         profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        min_display_score = (
+            int(profile["min_display_score"])
+            if profile and "min_display_score" in profile.keys() and profile["min_display_score"] is not None
+            else 40
+        )
+
         query = """
             SELECT j.*, e.match_score, e.skill_intersections, e.pros, e.cons, e.cv_tips,
                    c.name AS company_official_name
@@ -56,6 +63,10 @@ async def jobs_page(
         if filter_status != "all":
             query += " AND j.status = ?"
             params.append(filter_status)
+        if not show_low:
+            query += " AND (e.match_score IS NULL OR e.match_score >= ?)"
+            params.append(min_display_score)
+
         query += " ORDER BY j.is_agency ASC, COALESCE(e.match_score, 0) DESC, j.first_seen_at DESC"
         offers = conn.execute(query, params).fetchall()
     return templates.TemplateResponse(
@@ -66,6 +77,8 @@ async def jobs_page(
             "profile": profile,
             "offers": offers,
             "filter_status": filter_status,
+            "show_low": show_low,
+            "min_display_score": min_display_score,
             "scrape_summary": {
                 "checked": checked,
                 "added": added,
@@ -276,10 +289,13 @@ async def save_settings(
     use_jobs_cz: str = Form(""),
     use_prace_cz: str = Form(""),
     use_jenprace_cz: str = Form(""),
+    use_linkedin: str = Form(""),
+    use_uradprace_cz: str = Form(""),
     email_digest_enabled: str = Form(""),
     email_digest_frequency: str = Form("daily"),
     email_recipient: str = Form(""),
     email_min_score: int = Form(50),
+    min_display_score: int = Form(40),
 ):
     home_lat, home_lon = None, None
     if home_location.strip():
@@ -294,9 +310,12 @@ async def save_settings(
     b_jobs = 1 if use_jobs_cz else 0
     b_prace = 1 if use_prace_cz else 0
     b_jenprace = 1 if use_jenprace_cz else 0
+    b_linkedin = 1 if use_linkedin else 0
+    b_uradprace = 1 if use_uradprace_cz else 0
     b_email = 1 if email_digest_enabled else 0
     freq_val = email_digest_frequency.strip().lower() if email_digest_frequency.strip().lower() in {"daily", "weekly"} else "daily"
     score_val = max(0, min(100, int(email_min_score)))
+    display_score_val = max(0, min(100, int(min_display_score)))
 
     with db_session() as conn:
         conn.execute(
@@ -304,8 +323,9 @@ async def save_settings(
             UPDATE user_profile
             SET home_location = ?, home_lat = ?, home_lon = ?, max_commute_min = ?, max_commute_km = ?,
                 min_salary = ?, cv_text = ?, negative_patterns = ?, digest_time = ?,
-                use_jobs_cz = ?, use_prace_cz = ?, use_jenprace_cz = ?,
+                use_jobs_cz = ?, use_prace_cz = ?, use_jenprace_cz = ?, use_linkedin = ?, use_uradprace_cz = ?,
                 email_digest_enabled = ?, email_digest_frequency = ?, email_recipient = ?, email_min_score = ?,
+                min_display_score = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
             """,
@@ -322,10 +342,13 @@ async def save_settings(
                 b_jobs,
                 b_prace,
                 b_jenprace,
+                b_linkedin,
+                b_uradprace,
                 b_email,
                 freq_val,
                 email_recipient.strip(),
                 score_val,
+                display_score_val,
             ),
         )
         if home_lat is not None and home_lon is not None:

@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block content %}
@@ -9,7 +8,7 @@
 
     <h2 style="margin-bottom:0.2rem;">Nalezené pozice</h2>
 
-    <p style="margin:0;">Přehled nabídek seřazený podle přímého náboru a shody s vaším CV.</p>
+    <p style="margin:0;">Přehled nabídek seřazený podle přímého náboru a shody s vaším CV (filtr: od <strong>{{ min_display_score }} %</strong>).</p>
 
   </div>
 
@@ -61,15 +60,33 @@
 
 
 
-<div class="actions-inline" style="margin-bottom:1rem;">
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
 
-  <a href="/?filter_status=all" role="button" class="{{ '' if filter_status == 'all' else 'outline' }}">Vše</a>
+  <div class="actions-inline">
 
-  <a href="/?filter_status=new" role="button" class="{{ '' if filter_status == 'new' else 'outline' }}">Nové</a>
+    <a href="/?filter_status=all{% if show_low %}&show_low=1{% endif %}" role="button" class="{{ '' if filter_status == 'all' else 'outline' }}">Vše</a>
 
-  <a href="/?filter_status=interested" role="button" class="{{ '' if filter_status == 'interested' else 'outline' }}">Zajímavé</a>
+    <a href="/?filter_status=new{% if show_low %}&show_low=1{% endif %}" role="button" class="{{ '' if filter_status == 'new' else 'outline' }}">Nové</a>
 
-  <a href="/?filter_status=applied" role="button" class="{{ '' if filter_status == 'applied' else 'outline' }}">Odesláno</a>
+    <a href="/?filter_status=interested{% if show_low %}&show_low=1{% endif %}" role="button" class="{{ '' if filter_status == 'interested' else 'outline' }}">Zajímavé</a>
+
+    <a href="/?filter_status=applied{% if show_low %}&show_low=1{% endif %}" role="button" class="{{ '' if filter_status == 'applied' else 'outline' }}">Odesláno</a>
+
+  </div>
+
+  <div>
+
+    {% if show_low %}
+
+      <a href="/?filter_status={{ filter_status }}" role="button" class="secondary outline">Skrýt nabídky pod {{ min_display_score }} %</a>
+
+    {% else %}
+
+      <a href="/?filter_status={{ filter_status }}&show_low=1" role="button" class="secondary outline">Zobrazit i pod {{ min_display_score }} %</a>
+
+    {% endif %}
+
+  </div>
 
 </div>
 
@@ -147,9 +164,8 @@
 
 {% else %}
 
-  <p>Zatím zde nejsou žádné nabídky. Doplňte u vybraných firem v záložce <strong>Sledované firmy</strong> URL kariérní stránky a klikněte na <strong>Sběr z firem</strong>.</p>
+  <p>Žádné nabídky neodpovídají aktuálnímu filtru. Můžete upravit práh zobrazení v <strong>Nastavení</strong> nebo kliknout na <strong>Zobrazit i pod {{ min_display_score }} %</strong>.</p>
 
 {% endif %}
 
 {% endblock %}
-

@@ -50,10 +50,13 @@ def init_db() -> None:
                 use_jobs_cz INTEGER NOT NULL DEFAULT 0,
                 use_prace_cz INTEGER NOT NULL DEFAULT 0,
                 use_jenprace_cz INTEGER NOT NULL DEFAULT 0,
+                use_linkedin INTEGER NOT NULL DEFAULT 0,
+                use_uradprace_cz INTEGER NOT NULL DEFAULT 0,
                 email_digest_enabled INTEGER NOT NULL DEFAULT 0,
                 email_digest_frequency TEXT NOT NULL DEFAULT 'daily',
                 email_recipient TEXT NOT NULL DEFAULT '',
                 email_min_score INTEGER NOT NULL DEFAULT 50,
+                min_display_score INTEGER NOT NULL DEFAULT 40,
                 last_digest_run_date TEXT NOT NULL DEFAULT '',
                 last_email_digest_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -115,10 +118,13 @@ def init_db() -> None:
         _ensure_column(conn, "user_profile", "use_jobs_cz", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "use_prace_cz", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "use_jenprace_cz", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "user_profile", "use_linkedin", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "user_profile", "use_uradprace_cz", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "email_digest_enabled", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "email_digest_frequency", "TEXT NOT NULL DEFAULT 'daily'")
         _ensure_column(conn, "user_profile", "email_recipient", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "email_min_score", "INTEGER NOT NULL DEFAULT 50")
+        _ensure_column(conn, "user_profile", "min_display_score", "INTEGER NOT NULL DEFAULT 40")
         _ensure_column(conn, "user_profile", "last_digest_run_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "last_email_digest_at", "TEXT")
         _ensure_column(conn, "companies", "commute_km", "REAL")
@@ -129,8 +135,9 @@ def init_db() -> None:
             """
             INSERT OR IGNORE INTO user_profile (
                 id, max_commute_min, max_commute_km, digest_time,
-                use_jobs_cz, use_prace_cz, use_jenprace_cz,
-                email_digest_enabled, email_digest_frequency, email_recipient, email_min_score
-            ) VALUES (1, 30, 20, '07:30', 0, 0, 0, 0, 'daily', '', 50);
+                use_jobs_cz, use_prace_cz, use_jenprace_cz, use_linkedin, use_uradprace_cz,
+                email_digest_enabled, email_digest_frequency, email_recipient, email_min_score,
+                min_display_score
+            ) VALUES (1, 30, 20, '07:30', 0, 0, 0, 0, 0, 0, 'daily', '', 50, 40);
             """
         )

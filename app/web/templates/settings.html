@@ -60,6 +60,10 @@
       Čas denního souhrnného výpisu (HH:MM)
       <input type="time" name="digest_time" value="{{ profile.digest_time }}" required />
     </label>
+    <label>
+      Min. skóre pro zobrazení v přehledu (0–100)
+      <input type="number" name="min_display_score" value="{{ profile.min_display_score if profile.min_display_score is not none else 40 }}" min="0" max="100" />
+    </label>
   </div>
 
   <fieldset>
@@ -76,6 +80,14 @@
       <label>
         <input type="checkbox" name="use_jenprace_cz" value="1" {% if profile.use_jenprace_cz %}checked{% endif %} />
         JenPráce.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_linkedin" value="1" {% if profile.use_linkedin %}checked{% endif %} />
+        LinkedIn
+      </label>
+      <label>
+        <input type="checkbox" name="use_uradprace_cz" value="1" {% if profile.use_uradprace_cz %}checked{% endif %} />
+        Úřad práce ČR
       </label>
     </div>
   </fieldset>
@@ -100,7 +112,7 @@
         <input type="email" name="email_recipient" value="{{ profile.email_recipient or '' }}" placeholder="vas@email.cz" />
       </label>
       <label>
-        Minimální skóre shody (0–100)
+        Minimální skóre shody pro e-mail (0–100)
         <input type="number" name="email_min_score" value="{{ profile.email_min_score if profile.email_min_score is not none else 50 }}" min="0" max="100" />
       </label>
     </div>

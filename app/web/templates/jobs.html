@@ -1,0 +1,155 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+
+  <div>
+
+    <h2 style="margin-bottom:0.2rem;">Nalezené pozice</h2>
+
+    <p style="margin:0;">Přehled nabídek seřazený podle přímého náboru a shody s vaším CV.</p>
+
+  </div>
+
+  <div class="actions-inline">
+
+    <form method="post" action="/jobs/run-now" style="margin:0;">
+
+      <input type="hidden" name="include_boards" value="0" />
+
+      <button type="submit">Sběr z firem</button>
+
+    </form>
+
+    <form method="post" action="/jobs/run-now" style="margin:0;">
+
+      <input type="hidden" name="include_boards" value="1" />
+
+      <button type="submit" class="outline">Sběr firmy + portály</button>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+
+<hr />
+
+
+
+{% if scrape_summary %}
+
+<article style="border-left: 4px solid #2ea043;">
+
+  Zkontrolováno firem s URL: <strong>{{ scrape_summary.checked }}</strong> |
+
+  Nových z firem: <strong>{{ scrape_summary.added }}</strong> |
+
+  Nových z portálů: <strong>{{ scrape_summary.board_added }}</strong> |
+
+  Vyhodnoceno: <strong>{{ scrape_summary.evaluated }}</strong>
+
+  {% if scrape_summary.errors %} | Chyby: <strong>{{ scrape_summary.errors }}</strong>{% endif %}
+
+</article>
+
+{% endif %}
+
+
+
+<div class="actions-inline" style="margin-bottom:1rem;">
+
+  <a href="/?filter_status=all" role="button" class="{{ '' if filter_status == 'all' else 'outline' }}">Vše</a>
+
+  <a href="/?filter_status=new" role="button" class="{{ '' if filter_status == 'new' else 'outline' }}">Nové</a>
+
+  <a href="/?filter_status=interested" role="button" class="{{ '' if filter_status == 'interested' else 'outline' }}">Zajímavé</a>
+
+  <a href="/?filter_status=applied" role="button" class="{{ '' if filter_status == 'applied' else 'outline' }}">Odesláno</a>
+
+</div>
+
+
+
+{% if offers %}
+
+  {% for o in offers %}
+
+  <article>
+
+    <header style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+
+      <div>
+
+        <strong>{{ o.title }}</strong> — <span>{{ o.company_official_name or o.company_name_raw }}</span>
+
+        {% if o.is_agency %}<span class="badge badge-warn">Agentura</span>{% else %}<span class="badge badge-ok">Přímý nábor</span>{% endif %}
+
+        {% if o.board_name %}<small> ({{ o.board_name }})</small>{% endif %}
+
+      </div>
+
+      <div>
+
+        {% if o.match_score is not none %}
+
+          <strong>Shoda: {{ o.match_score }} %</strong>
+
+        {% endif %}
+
+        {% if o.commute_minutes is not none %}
+
+          | {{ o.commute_minutes }} min{% if o.commute_km is not none %} ({{ o.commute_km }} km){% endif %}
+
+        {% endif %}
+
+      </div>
+
+    </header>
+
+    {% if o.pros %}<p style="margin-bottom:0.4rem;"><strong>Plusy:</strong> {{ o.pros }}</p>{% endif %}
+
+    {% if o.cons %}<p style="margin-bottom:0.4rem;"><strong>Rizika / nesoulad:</strong> {{ o.cons }}</p>{% endif %}
+
+    {% if o.cv_tips %}<p style="margin-bottom:0.6rem;"><small><strong>Tip k CV:</strong> {{ o.cv_tips }}</small></p>{% endif %}
+
+    <footer style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+
+      <a href="{{ o.url }}" target="_blank">Otevřít inzerát</a>
+
+      <form method="post" action="/jobs/{{ o.id }}/status" class="actions-inline" style="margin:0;">
+
+        <select name="status" style="margin:0; width:auto;">
+
+          <option value="new" {{ 'selected' if o.status == 'new' else '' }}>Nová</option>
+
+          <option value="interested" {{ 'selected' if o.status == 'interested' else '' }}>Zajímavá</option>
+
+          <option value="applied" {{ 'selected' if o.status == 'applied' else '' }}>Odesláno</option>
+
+          <option value="hidden" {{ 'selected' if o.status == 'hidden' else '' }}>Skrýt</option>
+
+        </select>
+
+        <button type="submit" class="outline">Uložit stav</button>
+
+      </form>
+
+    </footer>
+
+  </article>
+
+  {% endfor %}
+
+{% else %}
+
+  <p>Zatím zde nejsou žádné nabídky. Doplňte u vybraných firem v záložce <strong>Sledované firmy</strong> URL kariérní stránky a klikněte na <strong>Sběr z firem</strong>.</p>
+
+{% endif %}
+
+{% endblock %}
+

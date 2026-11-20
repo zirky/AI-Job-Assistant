@@ -1,0 +1,23 @@
+
+services:
+
+  job-assistant:
+
+    build: .
+
+    container_name: job-assistant
+
+    restart: unless-stopped
+
+    ports:
+
+      - "8095:8080"
+
+    env_file:
+
+      - .env
+
+    volumes:
+
+      - ./data:/app/data
+

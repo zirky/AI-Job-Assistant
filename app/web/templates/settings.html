@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Profil, dojezd a CV</h2>
+
+{% if saved %}
+<article style="border-left: 4px solid #2ea043;">
+  Nastavení bylo uloženo a časy i vzdálenosti dojezdu byly aktualizovány.
+</article>
+{% endif %}
+
+{% if digest_sent is defined and digest_sent %}
+<article style="border-left: 4px solid #2ea043;">
+  Testovací e-mailový výpis byl odeslán.
+</article>
+{% endif %}
+
+<article>
+  <small>
+    Stav AI připojení:
+    {% if llm_configured %}
+      <strong style="color:#238636;">Připraveno ({{ llm_model }})</strong>
+    {% else %}
+      <strong style="color:#b07d10;">Chybí API klíč v souboru .env (LLM_API_KEY)</strong>
+    {% endif %}
+    &nbsp;|&nbsp;
+    SMTP e-mail:
+    {% if smtp_configured is defined and smtp_configured %}
+      <strong style="color:#238636;">Nakonfigurováno</strong>
+    {% else %}
+      <strong style="color:#b07d10;">Chybí SMTP_HOST v .env</strong>
+    {% endif %}
+  </small>
+</article>
+
+<form method="post" action="/settings">
+
+  <div class="grid">
+    <label>
+      Místo bydliště (město / obec) *
+      <input type="text" name="home_location" value="{{ profile.home_location }}" placeholder="např. Bohumín" required />
+    </label>
+    <label>
+      Maximální čas dojezdu (minuty) *
+      <input type="number" name="max_commute_min" value="{{ profile.max_commute_min }}" min="5" max="120" required />
+    </label>
+    <label>
+      Maximální vzdálenost dojezdu (km)
+      <input type="number" name="max_commute_km" value="{{ profile.max_commute_km or 20 }}" min="1" max="150" />
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>
+      Minimální požadovaný plat v Kč (volitelné)
+      <input type="number" name="min_salary" value="{{ profile.min_salary or '' }}" placeholder="ponechte prázdné, pokud nechcete omezovat" />
+    </label>
+    <label>
+      Čas denního souhrnného výpisu (HH:MM)
+      <input type="time" name="digest_time" value="{{ profile.digest_time }}" required />
+    </label>
+  </div>
+
+  <fieldset>
+    <legend>Pracovní portály</legend>
+    <div class="grid">
+      <label>
+        <input type="checkbox" name="use_jobs_cz" value="1" {% if profile.use_jobs_cz %}checked{% endif %} />
+        Jobs.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_prace_cz" value="1" {% if profile.use_prace_cz %}checked{% endif %} />
+        Práce.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_jenprace_cz" value="1" {% if profile.use_jenprace_cz %}checked{% endif %} />
+        JenPráce.cz
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>E-mailové notifikace (volitelně)</legend>
+    <label>
+      <input type="checkbox" name="email_digest_enabled" value="1" {% if profile.email_digest_enabled %}checked{% endif %} />
+      Odesílat e-mailový výpis nových nabídek
+    </label>
+
+    <div class="grid">
+      <label>
+        Frekvence výpisu
+        <select name="email_digest_frequency">
+          <option value="daily" {% if (profile.email_digest_frequency or 'daily') == 'daily' %}selected{% endif %}>Denní</option>
+          <option value="weekly" {% if profile.email_digest_frequency == 'weekly' %}selected{% endif %}>Týdenní</option>
+        </select>
+      </label>
+      <label>
+        Cílový e-mail
+        <input type="email" name="email_recipient" value="{{ profile.email_recipient or '' }}" placeholder="vas@email.cz" />
+      </label>
+      <label>
+        Minimální skóre shody (0–100)
+        <input type="number" name="email_min_score" value="{{ profile.email_min_score if profile.email_min_score is not none else 50 }}" min="0" max="100" />
+      </label>
+    </div>
+
+    {% if profile.last_email_digest_at %}
+    <small>Poslední odeslaný e-mailový výpis: <strong>{{ profile.last_email_digest_at }}</strong></small>
+    {% endif %}
+  </fieldset>
+
+  <label>
+    Nevhodné vzory / klíčová slova (oddělené čárkou nebo novým řádkem)
+    <textarea name="negative_patterns" rows="3" placeholder="např. obchodní zástupce, key account, brigáda">{{ profile.negative_patterns or '' }}</textarea>
+  </label>
+
+  <label>
+    Text životopisu (CV) pro vyhodnocování shody
+    <textarea name="cv_text" rows="10" placeholder="Vložte stručný přehled praxe, dovedností a vzdělání...">{{ profile.cv_text or '' }}</textarea>
+  </label>
+
+  <button type="submit">Uložit nastavení</button>
+</form>
+
+<form method="post" action="/settings/test-digest" style="margin-top: 1rem;">
+  <button type="submit" class="secondary">Odeslat testovací e-mailový výpis nyní</button>
+</form>
+
+{% endblock %}

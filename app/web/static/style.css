@@ -1,0 +1,21 @@
+
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.35rem; font-size: 0.78rem; font-weight: 600; }
+
+.badge-direct { background: #1f6feb22; color: #1f6feb; border: 1px solid #1f6feb55; }
+
+.badge-agency { background: #d2992222; color: #b07d10; border: 1px solid #d2992255; }
+
+.badge-new { background: #2ea04322; color: #238636; border: 1px solid #2ea04355; }
+
+.badge-ok { background: #2ea04322; color: #238636; }
+
+.badge-warn { background: #d2992222; color: #b07d10; }
+
+.nav-active { font-weight: 700; text-decoration: underline; }
+
+.actions-inline { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+.actions-inline form { margin: 0; }
+
+.actions-inline button { padding: 0.25rem 0.6rem; font-size: 0.85rem; margin: 0; }
+

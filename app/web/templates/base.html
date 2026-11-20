@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+
+<html lang="cs">
+
+<head>
+
+  <meta charset="UTF-8" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>AI Job Assistant</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+
+  <link rel="stylesheet" href="/static/style.css" />
+
+</head>
+
+<body>
+
+  <header class="container">
+
+    <nav>
+
+      <ul><li><strong>AI Job Assistant</strong></li></ul>
+
+      <ul>
+
+        <li><a href="/" class="{% if active_tab == 'jobs' %}nav-active{% endif %}">Nalezené pozice</a></li>
+
+        <li><a href="/companies" class="{% if active_tab == 'companies' %}nav-active{% endif %}">Sledované firmy</a></li>
+
+        <li><a href="/settings" class="{% if active_tab == 'settings' %}nav-active{% endif %}">Profil a CV</a></li>
+
+      </ul>
+
+    </nav>
+
+  </header>
+
+  <main class="container">{% block content %}{% endblock %}</main>
+
+</body>
+
+</html>
+

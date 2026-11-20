@@ -1,0 +1,183 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+
+  <div>
+
+    <h2 style="margin-bottom:0.2rem;">Sledované firmy (Watchlist)</h2>
+
+    <p style="margin:0;">Tyto firmy bude agent denně přednostně kontrolovat. Čas i vzdálenost dojezdu se počítají automaticky z místa bydliště.</p>
+
+  </div>
+
+  <div class="actions-inline">
+
+    <form method="post" action="/companies/suggest" style="margin:0;">
+
+      <button type="submit">Navrhnout firmy podle CV (AI)</button>
+
+    </form>
+
+    <form method="post" action="/companies/clear-ai" style="margin:0;" onsubmit="return confirm('Smazat všechny návrhy označené jako AI návrh?');">
+
+      <button type="submit" class="outline secondary">Smazat AI návrhy</button>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+
+<hr />
+
+
+
+{% if cleared is defined and cleared > 0 %}
+
+<article style="border-left: 4px solid #2ea043;">
+
+  Smazáno <strong>{{ cleared }}</strong> AI návrhů firem.
+
+</article>
+
+{% endif %}
+
+
+
+{% if suggested is defined and suggested > 0 %}
+
+<article style="border-left: 4px solid #2ea043;">
+
+  AI přidala <strong>{{ suggested }}</strong> nových navrhovaných firem a spočítala jim dojezdy. Upravte nebo smažte ty, které nechcete sledovat.
+
+</article>
+
+{% elif suggested is defined and suggested == 0 %}
+
+<article style="border-left: 4px solid #d29922;">
+
+  AI nevrátila žádné nové vhodné firmy v limitu dojezdu (nebo už jsou v seznamu). Zkontrolujte log kontejneru nebo zkuste generování znovu.
+
+</article>
+
+{% endif %}
+
+
+
+{% if no_ai %}
+
+<article style="border-left: 4px solid #d29922;">
+
+  AI návrh se nepodařilo spustit. Ověřte, že máte v <code>.env</code> nastavený platný <code>LLM_API_KEY</code> a model, a že máte vyplněné bydliště a CV.
+
+</article>
+
+{% endif %}
+
+
+
+<article>
+
+  <header><strong>+ Přidat firmu ručně</strong></header>
+
+  <form method="post" action="/companies/add">
+
+    <div class="grid">
+
+      <label>Název firmy *<input type="text" name="name" placeholder="např. Bonatrans Group" required /></label>
+
+      <label>Město / Areál (pro výpočet dojezdu)<input type="text" name="city" placeholder="např. Bohumín" /></label>
+
+    </div>
+
+    <div class="grid">
+
+      <label>URL kariérní stránky<input type="url" name="career_url" placeholder="https://..." /></label>
+
+      <label>Typ načítání
+
+        <select name="scraper_type">
+
+          <option value="auto">Automaticky (HTTP / JSON-LD)</option>
+
+          <option value="playwright">Dynamický web (JS prohlížeč)</option>
+
+          <option value="manual">Pouze odkaz (ruční kontrola)</option>
+
+        </select>
+
+      </label>
+
+    </div>
+
+    <label>Poznámka<input type="text" name="notes" placeholder="např. přímý nábor údržby, dobrá dostupnost" /></label>
+
+    <button type="submit">Přidat do sledování</button>
+
+  </form>
+
+</article>
+
+
+
+{% if companies %}
+
+<figure>
+
+  <table>
+
+    <thead><tr><th>Firma</th><th>Lokalita</th><th>Dojezd</th><th>Kariéra</th><th>Stav</th><th>Akce</th></tr></thead>
+
+    <tbody>
+
+      {% for c in companies %}
+
+      <tr>
+
+        <td><strong>{{ c.name }}</strong>{% if c.notes %}<br /><small>{{ c.notes }}</small>{% endif %}</td>
+
+        <td>{{ c.city or '—' }}</td>
+
+        <td>
+
+          {% if c.commute_minutes is not none %}<strong>{{ c.commute_minutes }} min</strong>{% else %}—{% endif %}
+
+          {% if c.commute_km is not none %}<br /><small>{{ c.commute_km }} km</small>{% endif %}
+
+        </td>
+
+        <td>{% if c.career_url %}<a href="{{ c.career_url }}" target="_blank">Otevřít web</a>{% else %}<small>bez URL</small>{% endif %}<br /><small>{{ c.last_status }}</small></td>
+
+        <td>{% if c.is_active %}<span class="badge badge-ok">Aktivní</span>{% else %}<span class="badge badge-warn">Pozastaveno</span>{% endif %}</td>
+
+        <td class="actions-inline">
+
+          <form method="post" action="/companies/{{ c.id }}/toggle"><button type="submit" class="outline">{{ 'Pozastavit' if c.is_active else 'Zapnout' }}</button></form>
+
+          <form method="post" action="/companies/{{ c.id }}/delete" onsubmit="return confirm('Opravdu smazat firmu?');"><button type="submit" class="outline contrast">Smazat</button></form>
+
+        </td>
+
+      </tr>
+
+      {% endfor %}
+
+    </tbody>
+
+  </table>
+
+</figure>
+
+{% else %}
+
+  <p>Zatím nemáte přidané žádné firmy. Klikněte na <strong>Navrhnout firmy podle CV (AI)</strong> nebo přidejte firmu ručně výše.</p>
+
+{% endif %}
+
+{% endblock %}
+

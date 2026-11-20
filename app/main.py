@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import db_session, init_db
+from app.services.cleanup import delete_expired_offers
 from app.services.job_boards import run_job_boards_cycle
 from app.services.matcher import evaluate_pending_offers
 from app.services.notifier import maybe_send_email_digest
@@ -16,6 +17,7 @@ _cycle_lock = asyncio.Lock()
 
 async def run_scheduled_pipeline() -> None:
     async with _cycle_lock:
+        await asyncio.to_thread(delete_expired_offers)
         await run_scrape_cycle()
         await run_job_boards_cycle()
         await evaluate_pending_offers(limit=25)

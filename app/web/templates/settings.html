@@ -10,6 +10,12 @@
 </article>
 {% endif %}
 
+{% if cleaned_count is defined and cleaned_count is not none %}
+<article style="border-left: 4px solid #2ea043;">
+  Z databáze bylo smazáno starých neaktivních nabídek: <strong>{{ cleaned_count }}</strong>.
+</article>
+{% endif %}
+
 {% if digest_sent is defined and digest_sent %}
 <article style="border-left: 4px solid #2ea043;">
   Testovací e-mailový výpis byl odeslán.
@@ -63,6 +69,13 @@
     <label>
       Min. skóre pro zobrazení v přehledu (0–100)
       <input type="number" name="min_display_score" value="{{ profile.min_display_score if profile.min_display_score is not none else 40 }}" min="0" max="100" />
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>
+      Mazat staré neaktivní inzeráty po (dní, 0 = vypnuto)
+      <input type="number" name="auto_delete_days" value="{{ profile.auto_delete_days if profile.auto_delete_days is not none else 30 }}" min="0" max="365" />
     </label>
   </div>
 
@@ -135,8 +148,13 @@
   <button type="submit">Uložit nastavení</button>
 </form>
 
-<form method="post" action="/settings/test-digest" style="margin-top: 1rem;">
-  <button type="submit" class="secondary">Odeslat testovací e-mailový výpis nyní</button>
-</form>
+<div class="actions-inline" style="margin-top: 1rem;">
+  <form method="post" action="/settings/cleanup-now" style="margin:0;">
+    <button type="submit" class="secondary outline">Pročistit staré inzeráty nyní</button>
+  </form>
+  <form method="post" action="/settings/test-digest" style="margin:0;">
+    <button type="submit" class="secondary">Odeslat testovací e-mailový výpis nyní</button>
+  </form>
+</div>
 
 {% endblock %}

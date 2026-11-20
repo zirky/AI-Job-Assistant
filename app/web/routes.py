@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from app.config import settings
 from app.database import db_session
+from app.services.cleanup import delete_expired_offers
 from app.services.distance import estimate_commute, geocode_location
 from app.services.job_boards import run_job_boards_cycle
 from app.services.matcher import evaluate_pending_offers
@@ -41,6 +42,7 @@ async def jobs_page(
     added: int = 0,
     board_added: int = 0,
     evaluated: int = 0,
+    deleted_old: int = 0,
     errors: int = 0,
 ):
     with db_session() as conn:
@@ -84,9 +86,10 @@ async def jobs_page(
                 "added": added,
                 "board_added": board_added,
                 "evaluated": evaluated,
+                "deleted_old": deleted_old,
                 "errors": errors,
             }
-            if (checked or added or board_added or evaluated or errors)
+            if (checked or added or board_added or evaluated or deleted_old or errors)
             else None,
         },
     )
@@ -94,6 +97,7 @@ async def jobs_page(
 
 @router.post("/jobs/run-now")
 async def run_jobs_now(include_boards: int = Form(0)):
+    deleted_old = delete_expired_offers()
     stats = await run_scrape_cycle()
     board_added = 0
     board_errors = 0
@@ -106,7 +110,7 @@ async def run_jobs_now(include_boards: int = Form(0)):
     return RedirectResponse(
         url=(
             f"/?checked={stats['companies_checked']}&added={stats['new_offers']}"
-            f"&board_added={board_added}&evaluated={evaluated}&errors={total_errors}"
+            f"&board_added={board_added}&evaluated={evaluated}&deleted_old={deleted_old}&errors={total_errors}"
         ),
         status_code=303,
     )
@@ -259,7 +263,7 @@ async def delete_company(company_id: int):
 
 
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, saved: int = 0, digest_sent: int = 0):
+async def settings_page(request: Request, saved: int = 0, digest_sent: int = 0, cleaned_count: int = -1):
     with db_session() as conn:
         profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
     return templates.TemplateResponse(
@@ -270,6 +274,7 @@ async def settings_page(request: Request, saved: int = 0, digest_sent: int = 0):
             "profile": profile,
             "saved": saved,
             "digest_sent": digest_sent,
+            "cleaned_count": cleaned_count if cleaned_count >= 0 else None,
             "llm_configured": bool(settings.llm_api_key and settings.llm_api_key != "vas_api_klic_zde"),
             "llm_model": settings.llm_model,
             "smtp_configured": bool(settings.smtp_host),
@@ -296,6 +301,7 @@ async def save_settings(
     email_recipient: str = Form(""),
     email_min_score: int = Form(50),
     min_display_score: int = Form(40),
+    auto_delete_days: int = Form(30),
 ):
     home_lat, home_lon = None, None
     if home_location.strip():
@@ -316,6 +322,7 @@ async def save_settings(
     freq_val = email_digest_frequency.strip().lower() if email_digest_frequency.strip().lower() in {"daily", "weekly"} else "daily"
     score_val = max(0, min(100, int(email_min_score)))
     display_score_val = max(0, min(100, int(min_display_score)))
+    delete_days_val = max(0, min(365, int(auto_delete_days)))
 
     with db_session() as conn:
         conn.execute(
@@ -325,7 +332,7 @@ async def save_settings(
                 min_salary = ?, cv_text = ?, negative_patterns = ?, digest_time = ?,
                 use_jobs_cz = ?, use_prace_cz = ?, use_jenprace_cz = ?, use_linkedin = ?, use_uradprace_cz = ?,
                 email_digest_enabled = ?, email_digest_frequency = ?, email_recipient = ?, email_min_score = ?,
-                min_display_score = ?,
+                min_display_score = ?, auto_delete_days = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
             """,
@@ -349,6 +356,7 @@ async def save_settings(
                 email_recipient.strip(),
                 score_val,
                 display_score_val,
+                delete_days_val,
             ),
         )
         if home_lat is not None and home_lon is not None:
@@ -357,6 +365,12 @@ async def save_settings(
                 minutes, km = await estimate_commute(home_lat, home_lon, comp["lat"], comp["lon"])
                 conn.execute("UPDATE companies SET commute_minutes = ?, commute_km = ? WHERE id = ?", (minutes, km, comp["id"]))
     return RedirectResponse(url="/settings?saved=1", status_code=303)
+
+
+@router.post("/settings/cleanup-now")
+async def cleanup_old_offers_now():
+    deleted = delete_expired_offers()
+    return RedirectResponse(url=f"/settings?cleaned_count={deleted}", status_code=303)
 
 
 @router.post("/settings/test-digest")

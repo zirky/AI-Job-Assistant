@@ -57,6 +57,7 @@ def init_db() -> None:
                 email_recipient TEXT NOT NULL DEFAULT '',
                 email_min_score INTEGER NOT NULL DEFAULT 50,
                 min_display_score INTEGER NOT NULL DEFAULT 40,
+                auto_delete_days INTEGER NOT NULL DEFAULT 30,
                 last_digest_run_date TEXT NOT NULL DEFAULT '',
                 last_email_digest_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -99,7 +100,8 @@ def init_db() -> None:
                 content_hash TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'new',
                 first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP
+                last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                notified_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS job_evaluations (
@@ -125,11 +127,13 @@ def init_db() -> None:
         _ensure_column(conn, "user_profile", "email_recipient", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "email_min_score", "INTEGER NOT NULL DEFAULT 50")
         _ensure_column(conn, "user_profile", "min_display_score", "INTEGER NOT NULL DEFAULT 40")
+        _ensure_column(conn, "user_profile", "auto_delete_days", "INTEGER NOT NULL DEFAULT 30")
         _ensure_column(conn, "user_profile", "last_digest_run_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "last_email_digest_at", "TEXT")
         _ensure_column(conn, "companies", "commute_km", "REAL")
         _ensure_column(conn, "job_offers", "commute_km", "REAL")
         _ensure_column(conn, "job_offers", "board_name", "TEXT")
+        _ensure_column(conn, "job_offers", "notified_at", "TEXT")
 
         conn.execute(
             """
@@ -137,7 +141,7 @@ def init_db() -> None:
                 id, max_commute_min, max_commute_km, digest_time,
                 use_jobs_cz, use_prace_cz, use_jenprace_cz, use_linkedin, use_uradprace_cz,
                 email_digest_enabled, email_digest_frequency, email_recipient, email_min_score,
-                min_display_score
-            ) VALUES (1, 30, 20, '07:30', 0, 0, 0, 0, 0, 0, 'daily', '', 50, 40);
+                min_display_score, auto_delete_days
+            ) VALUES (1, 30, 20, '07:30', 0, 0, 0, 0, 0, 0, 'daily', '', 50, 40, 30);
             """
         )

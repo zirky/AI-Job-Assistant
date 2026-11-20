@@ -52,6 +52,8 @@
 
   Vyhodnoceno: <strong>{{ scrape_summary.evaluated }}</strong>
 
+  {% if scrape_summary.deleted_old %} | Smazáno starých: <strong>{{ scrape_summary.deleted_old }}</strong>{% endif %}
+
   {% if scrape_summary.errors %} | Chyby: <strong>{{ scrape_summary.errors }}</strong>{% endif %}
 
 </article>

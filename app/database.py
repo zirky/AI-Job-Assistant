@@ -45,6 +45,7 @@ def init_db() -> None:
                 min_salary INTEGER,
                 cv_text TEXT NOT NULL DEFAULT '',
                 cv_skills_json TEXT NOT NULL DEFAULT '[]',
+                search_keywords TEXT NOT NULL DEFAULT '',
                 negative_patterns TEXT NOT NULL DEFAULT '',
                 digest_time TEXT NOT NULL DEFAULT '07:30',
                 use_jobs_cz INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +118,7 @@ def init_db() -> None:
             """
         )
         _ensure_column(conn, "user_profile", "max_commute_km", "INTEGER NOT NULL DEFAULT 20")
+        _ensure_column(conn, "user_profile", "search_keywords", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "use_jobs_cz", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "use_prace_cz", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "use_jenprace_cz", "INTEGER NOT NULL DEFAULT 0")
@@ -139,9 +141,10 @@ def init_db() -> None:
             """
             INSERT OR IGNORE INTO user_profile (
                 id, max_commute_min, max_commute_km, digest_time,
+                search_keywords,
                 use_jobs_cz, use_prace_cz, use_jenprace_cz, use_linkedin, use_uradprace_cz,
                 email_digest_enabled, email_digest_frequency, email_recipient, email_min_score,
                 min_display_score, auto_delete_days
-            ) VALUES (1, 30, 20, '07:30', 0, 0, 0, 0, 0, 0, 'daily', '', 50, 40, 30);
+            ) VALUES (1, 30, 20, '07:30', '', 0, 0, 0, 0, 0, 0, 'daily', '', 50, 40, 30);
             """
         )

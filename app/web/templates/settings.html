@@ -136,12 +136,17 @@
   </fieldset>
 
   <label>
+    Vlastní klíčová slova / obory pro hledání (oddělené čárkou nebo novým řádkem)
+    <textarea name="search_keywords" rows="2" placeholder="např. seřizovač, údržbář, provozní zámečník – AI doplní příbuzné profese dle CV">{{ profile.search_keywords or '' }}</textarea>
+  </label>
+
+  <label>
     Nevhodné vzory / klíčová slova (oddělené čárkou nebo novým řádkem)
     <textarea name="negative_patterns" rows="3" placeholder="např. obchodní zástupce, key account, brigáda">{{ profile.negative_patterns or '' }}</textarea>
   </label>
 
   <label>
-    Text životopisu (CV) pro vyhodnocování shody
+    Text životopisu (CV) pro vyhodnocování shody a návrh hledaných profesí
     <textarea name="cv_text" rows="10" placeholder="Vložte stručný přehled praxe, dovedností a vzdělání...">{{ profile.cv_text or '' }}</textarea>
   </label>
 

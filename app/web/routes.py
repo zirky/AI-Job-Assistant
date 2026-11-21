@@ -289,6 +289,7 @@ async def save_settings(
     max_commute_km: int = Form(20),
     min_salary: str = Form(""),
     digest_time: str = Form("07:30"),
+    search_keywords: str = Form(""),
     negative_patterns: str = Form(""),
     cv_text: str = Form(""),
     use_jobs_cz: str = Form(""),
@@ -329,7 +330,7 @@ async def save_settings(
             """
             UPDATE user_profile
             SET home_location = ?, home_lat = ?, home_lon = ?, max_commute_min = ?, max_commute_km = ?,
-                min_salary = ?, cv_text = ?, negative_patterns = ?, digest_time = ?,
+                min_salary = ?, cv_text = ?, search_keywords = ?, negative_patterns = ?, digest_time = ?,
                 use_jobs_cz = ?, use_prace_cz = ?, use_jenprace_cz = ?, use_linkedin = ?, use_uradprace_cz = ?,
                 email_digest_enabled = ?, email_digest_frequency = ?, email_recipient = ?, email_min_score = ?,
                 min_display_score = ?, auto_delete_days = ?,
@@ -344,6 +345,7 @@ async def save_settings(
                 max_commute_km,
                 salary_val,
                 clean_cv,
+                search_keywords.strip(),
                 negative_patterns.strip(),
                 digest_time.strip() or "07:30",
                 b_jobs,

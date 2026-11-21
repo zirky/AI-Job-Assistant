@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup, Tag
 import httpx
 from app.database import db_session
 from app.services.distance import estimate_commute, geocode_location
+from app.services.query_planner import get_search_terms_for_profile
 from app.services.scraper import _is_agency, _looks_like_job
 
 MPSV_DATA_URL = "https://data.mpsv.cz/od/soubory/volna-mista/volna-mista.json.gz"
@@ -26,47 +27,6 @@ OKRES_ID_MAP = {
     "Okres/3805": "Bruntál",
     "Okres/3810": "Nový Jičín",
 }
-
-SEARCH_TERMS = [
-    "údržba",
-    "mechanik",
-    "seřizovač",
-    "diagnostika",
-]
-
-DISTANT_CITIES = [
-    "praha",
-    "vestec",
-    "brno",
-    "hustopeče",
-    "litoměřice",
-    "kostelec",
-    "libáň",
-    "němčice",
-    "lovosice",
-    "kroměříž",
-    "plzeň",
-    "české budějovice",
-    "liberec",
-    "ústí nad labem",
-    "hradec králové",
-    "pardubice",
-    "olomouc",
-    "zlín",
-    "jihlava",
-    "znojmo",
-    "kolín",
-    "mladá boleslav",
-    "jablonec",
-    "blansko",
-    "tábor",
-    "přerov",
-    "vsetín",
-    "cheb",
-    "prostějov",
-    "králíky",
-    "bystřec",
-]
 
 BOARD_NAMES = {"jobs.cz", "prace.cz", "jenprace.cz", "linkedin.com", "uradprace.cz"}
 
@@ -118,11 +78,6 @@ def _norm_key(title: str, company: str) -> str:
     t = re.sub(r"[^a-z0-9áčďéěíňóřšťúůýž]+", " ", (title or "").lower()).strip()
     c = re.sub(r"[^a-z0-9áčďéěíňóřšťúůýž]+", " ", (company or "").lower()).strip()
     return f"{t[:80]}||{c[:50]}"
-
-
-def _has_distant_city(text: str) -> bool:
-    low = (text or "").lower()
-    return any(re.search(rf"\b{re.escape(city)}\b", low) for city in DISTANT_CITIES)
 
 
 def _is_hidden_agency_text(text: str) -> bool:
@@ -241,6 +196,7 @@ def _extract_best_locality(
     company_name: str = "",
     url: str = "",
     soup: Optional[BeautifulSoup] = None,
+    allow_company_guess: bool = True,
 ) -> Optional[str]:
     if soup is not None:
         ld_loc = _extract_json_ld_locality(soup)
@@ -264,7 +220,9 @@ def _extract_best_locality(
     if m_zip:
         return m_zip.group(1)
 
-    return _extract_locality_from_company_or_url(company_name, url)
+    if allow_company_guess:
+        return _extract_locality_from_company_or_url(company_name, url)
+    return None
 
 
 def _clean_company_candidate(raw_txt: str, title: str = "", strict: bool = False) -> Optional[str]:
@@ -523,8 +481,10 @@ def _extract_mpsv_locality(row: Dict[str, Any]) -> str:
             dodatek = str(p.get("dodatekAdresy") or addr.get("dodatekAdresy") or "").strip()
             p_nazev = str(p.get("nazev") or "").strip()
 
-            # Zkusíme z dodatku nebo názvu vytáhnout část s PSČ a obcí (např. "561 69 Králíky")
-            m_psc_city = re.search(r"\b([1-7]\d{2}\s?\d{2})\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+)?)", f"{dodatek} {p_nazev}")
+            m_psc_city = re.search(
+                r"\b([1-7]\d{2}\s?\d{2})\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+)?)",
+                f"{dodatek} {p_nazev}",
+            )
             if m_psc_city:
                 return f"{m_psc_city.group(1)} {m_psc_city.group(2)}"
 
@@ -580,8 +540,6 @@ async def _fetch_mpsv_offers(term: str, location: str, limit: int = 25) -> List[
 
         haystack = f"{title} {company_name} {lok_val} {desc}".lower()
         if term_low and term_low not in haystack:
-            continue
-        if _has_distant_city(f"{lok_val} {desc}"):
             continue
 
         portal_id = row.get("portalId")
@@ -759,16 +717,24 @@ async def _resolve_offer_commute(
     company_name: str = "",
     url: str = "",
     soup: Optional[BeautifulSoup] = None,
-) -> Tuple[Optional[int], Optional[float]]:
+    allow_company_guess: bool = True,
+) -> Tuple[Optional[int], Optional[float], Optional[str]]:
     if home_lat is None or home_lon is None:
-        return None, None
-    loc = _extract_best_locality(offer_text, company_name=company_name, url=url, soup=soup)
+        return None, None, None
+    loc = _extract_best_locality(
+        offer_text,
+        company_name=company_name,
+        url=url,
+        soup=soup,
+        allow_company_guess=allow_company_guess,
+    )
     if not loc:
-        return None, None
+        return None, None, None
     coords = await geocode_location(loc)
     if not coords:
-        return None, None
-    return await estimate_commute(home_lat, home_lon, coords[0], coords[1])
+        return None, None, loc
+    c_min, c_km = await estimate_commute(home_lat, home_lon, coords[0], coords[1])
+    return c_min, c_km, loc
 
 
 async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict[str, int]:
@@ -811,9 +777,10 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
     home_lon = profile.get("home_lon")
     max_min = profile.get("max_commute_min") or 30
     max_km = float(profile.get("max_commute_km") or 20)
+    search_terms = await get_search_terms_for_profile(profile, max_terms=8)
 
     for board in enabled_boards:
-        for term in SEARCH_TERMS:
+        for term in search_terms:
             raw_items: List[Dict[str, str]] = []
             last_err: Optional[Exception] = None
 
@@ -871,8 +838,6 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                 desc = item.get("description", "").strip()
 
                 combined_text = f"{title} {desc} {company_name} {offer_url}"
-                if _has_distant_city(combined_text):
-                    continue
 
                 content_hash = hashlib.sha256(
                     f"{title.lower()}|{company_name.lower()}|{desc[:250].lower()}".encode("utf-8")
@@ -883,13 +848,17 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                     stats["skipped_duplicates"] += 1
                     continue
 
-                c_min, c_km = await _resolve_offer_commute(
+                c_min, c_km, resolved_loc = await _resolve_offer_commute(
                     combined_text,
                     home_lat,
                     home_lon,
                     company_name=company_name,
                     url=offer_url,
+                    allow_company_guess=(board != "linkedin.com"),
                 )
+                if board == "linkedin.com" and home_lat is not None and home_lon is not None:
+                    if not resolved_loc or c_km is None:
+                        continue
                 if c_min is not None and c_min > (max_min + 10):
                     continue
                 if c_km is not None and float(c_km) > (max_km + 10.0):

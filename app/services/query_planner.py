@@ -74,11 +74,11 @@ def _extract_string_array(raw_text: str) -> List[str]:
 
 def _candidate_models() -> List[str]:
     models: List[str] = []
-    primary = (getattr(settings, "llm_model", None) or "").strip()
+    primary = (getattr(settings, "llm_model", None) or os.getenv("LLM_MODEL") or "").strip()
     if primary:
         models.append(primary)
 
-    extra = getattr(settings, "llm_fallback_models", None)
+    extra = getattr(settings, "llm_fallback_models", None) or os.getenv("LLM_FALLBACK_MODELS", "")
     if isinstance(extra, (list, tuple)):
         for m in extra:
             ms = str(m).strip()
@@ -91,10 +91,9 @@ def _candidate_models() -> List[str]:
                 models.append(ms)
 
     for m in [
-        "google/gemma-3-27b-it:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "qwen/qwen3-coder:free",
         "openrouter/free",
+        "google/gemma-4-26b-a4b-it:free",
+        "google/gemma-4-31b-it:free",
     ]:
         if m not in models:
             models.append(m)
@@ -140,7 +139,7 @@ async def _call_gemini(system_prompt: str, user_prompt: str) -> str:
     gemini_model = (
         getattr(settings, "gemini_model", None)
         or os.getenv("GEMINI_MODEL")
-        or "gemini-2.5-flash"
+        or "gemini-3.1-flash-lite"
     ).strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent"
     payload = {

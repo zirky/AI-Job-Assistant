@@ -43,17 +43,34 @@ def _sanitize_error_text(exc: Exception, gemini_key: str = "") -> str:
     return msg[:300]
 
 
+def _get_gemini_key() -> str:
+    return (getattr(settings, "gemini_api_key", None) or os.getenv("GEMINI_API_KEY") or "").strip()
+
+
+def _get_gemini_model() -> str:
+    return (getattr(settings, "gemini_model", None) or os.getenv("GEMINI_MODEL") or "gemini-3.1-flash-lite").strip()
+
+
 def _candidate_models() -> List[str]:
     models: List[str] = []
-    primary = (getattr(settings, "llm_model", "") or os.getenv("LLM_MODEL", "")).strip()
+    primary = (getattr(settings, "llm_model", None) or os.getenv("LLM_MODEL") or "").strip()
     if primary:
         models.append(primary)
-    extra = os.getenv("LLM_FALLBACK_MODELS", "")
-    for item in extra.split(","):
-        m = item.strip()
-        if m and m not in models:
+    extra = getattr(settings, "llm_fallback_models", None) or os.getenv("LLM_FALLBACK_MODELS", "")
+    if isinstance(extra, (list, tuple)):
+        for m in extra:
+            ms = str(m).strip()
+            if ms and ms not in models:
+                models.append(ms)
+    elif isinstance(extra, str) and extra.strip():
+        for item in re.split(r"[,\n;]+", extra):
+            m = item.strip()
+            if m and m not in models:
+                models.append(m)
+    for m in ["openrouter/free", "google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]:
+        if m not in models:
             models.append(m)
-    return models or ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "openrouter/free"]
+    return models
 
 
 def _extract_json_obj(raw_text: str) -> Dict[str, Any]:
@@ -197,10 +214,10 @@ Vrať POUZE validní JSON objekt bez markdownu:
 
 
 async def _call_gemini_direct(prompt: str) -> Optional[Dict[str, Any]]:
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_key = _get_gemini_key()
     if not gemini_key:
         return None
-    model = (os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite") or "gemini-3.1-flash-lite").strip()
+    model = _get_gemini_model()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {
         "x-goog-api-key": gemini_key,
@@ -236,11 +253,11 @@ async def _call_gemini_direct(prompt: str) -> Optional[Dict[str, Any]]:
 
 
 async def _llm_evaluation(offer: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
-    api_key = (getattr(settings, "llm_api_key", "") or os.getenv("LLM_API_KEY", "")).strip()
+    api_key = (getattr(settings, "llm_api_key", None) or os.getenv("LLM_API_KEY") or "").strip()
     if api_key == "vas_api_klic_zde":
         api_key = ""
-    base_url = (getattr(settings, "llm_api_base", "") or os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")).rstrip("/")
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    base_url = (getattr(settings, "llm_api_base", None) or os.getenv("LLM_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
+    gemini_key = _get_gemini_key()
 
     if not api_key and not gemini_key:
         return _heuristic_evaluation(offer, profile)

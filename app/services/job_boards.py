@@ -59,12 +59,15 @@ AGENCY_NAME_RE = re.compile(
 )
 
 DISTANT_REGION_RE = re.compile(
-    r"\b(?:hl\.\s*m\.\s*praha|praha\s*[1-9]?|st[řr]edo[čc]esk[ýy]\s+kraj|nupaky|"
+    r"\b(?:hl\.\s*m\.\s*praha|praha\s*[1-9]?|st[řr]edo[čc]esk[ýy]\s+kraj|nupaky|kladno|"
     r"karlovarsk[ýy]\s+kraj|doln[íi]\s+rychnov|cheb|sokolov|karlovy\s+vary|"
     r"[úu]steck[ýy]\s+kraj|libereck[ýy]\s+kraj|kr[áa]lov[ée]hradeck[ýy]\s+kraj|"
     r"pardubick[ýy]\s+kraj|jiho[čc]esk[ýy]\s+kraj|plze[ňn]sk[ýy]\s+kraj|vyso[čc]ina)\b",
     flags=re.IGNORECASE,
 )
+
+# PSČ mimo Moravu/Slezsko (začínající 1, 2, 3, 4, 5)
+DISTANT_PSC_RE = re.compile(r"\b([1-5]\d{2}\s?\d{2})\b")
 
 
 def _log(msg: str) -> None:
@@ -107,7 +110,7 @@ def _extract_explicit_locality(text: str) -> Optional[str]:
         return None
     m = re.search(
         r"(?:Lokalita|M[íi]sto\s+pracovi[šs]t[ěe]|M[íi]sto\s+v[ýy]konu\s+pr[áa]ce|Obec|M[ěe]sto)\s*:\s*"
-        r"([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^\n|]{1,70}?)"
+        r"([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ0-9][^\n|]{1,70}?)"
         r"(?=\s*\.\s*(?:Mzda|Plat|Sm[ěe]ny|Lokalita)\b|\s+(?:N[áa]zev\s+firmy|Zam[ěe]stnavatel|Spole[čc]nost|Typ\s+[úu]vazku|Mzda|Plat|Sm[ěe]ny|Aktualizov[áa]no|P[řr]id[áa]no)\b|$)",
         text,
     )
@@ -192,7 +195,7 @@ def _extract_locality_from_company_or_url(company_name: str, url: str) -> Option
     words = [w for w in clean_comp.split() if len(w) >= 4 and w[0].isupper() and not w.isupper()]
     skip_words = {
         "proks", "plastic", "plasty", "siemens", "hilite", "mahle", "system",
-        "electronic", "expert", "recruitment", "comac", "manuvia",
+        "electronic", "expert", "recruitment", "comac", "manuvia", "mark", "corporation",
     }
     for w in words:
         if w.lower() not in skip_words:
@@ -482,41 +485,68 @@ def _extract_mpsv_str(val: Any, lang: str = "cs") -> str:
 def _extract_mpsv_locality(row: Dict[str, Any]) -> str:
     mv_prace = row.get("mistoVykonuPrace") if isinstance(row.get("mistoVykonuPrace"), dict) else {}
 
+    # 1. Kontrola okresů – pokud má nabídka zadané okresy a žádný není v našem okolí, rovnou ji vyřadíme
+    okresy = mv_prace.get("okresy")
+    allowed_okres_names: List[str] = []
+    if isinstance(okresy, list) and okresy:
+        for ok in okresy:
+            if isinstance(ok, dict):
+                ok_id = str(ok.get("id") or "").strip()
+                if ok_id in OKRES_ID_MAP:
+                    allowed_okres_names.append(OKRES_ID_MAP[ok_id])
+        if not allowed_okres_names:
+            return "__OUT_OF_REGION__"
+
     pracoviste = mv_prace.get("pracoviste")
     if isinstance(pracoviste, list):
+        has_any_okres_in_prac = False
+        has_allowed_okres_in_prac = False
+        for p in pracoviste:
+            if not isinstance(p, dict):
+                continue
+            addr = p.get("adresa") if isinstance(p.get("adresa"), dict) else {}
+            okres_obj = addr.get("okres") if isinstance(addr.get("okres"), dict) else {}
+            ok_id = str(okres_obj.get("id") or "").strip()
+            if ok_id:
+                has_any_okres_in_prac = True
+                if ok_id in OKRES_ID_MAP:
+                    has_allowed_okres_in_prac = True
+                    allowed_okres_names.append(OKRES_ID_MAP[ok_id])
+
+        if has_any_okres_in_prac and not has_allowed_okres_in_prac:
+            return "__OUT_OF_REGION__"
+
         for p in pracoviste:
             if not isinstance(p, dict):
                 continue
             addr = p.get("adresa") if isinstance(p.get("adresa"), dict) else {}
             psc = str(addr.get("psc") or "").strip()
+            if psc and psc[0] in {"1", "2", "3", "4", "5"}:
+                return "__OUT_OF_REGION__"
+
+            obec_obj = addr.get("obec") if isinstance(addr.get("obec"), dict) else {}
+            obec = str(obec_obj.get("nazev") or "").strip()
             ulice_obj = addr.get("ulice") if isinstance(addr.get("ulice"), dict) else {}
             ulice = str(ulice_obj.get("nazev") or "").strip()
             dodatek = str(p.get("dodatekAdresy") or addr.get("dodatekAdresy") or "").strip()
             p_nazev = str(p.get("nazev") or "").strip()
 
             m_psc_city = re.search(
-                r"\b([1-7]\d{2}\s?\d{2})\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+)?)",
+                r"\b([67]\d{2}\s?\d{2})\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž-]+)?)",
                 f"{dodatek} {p_nazev}",
             )
             if m_psc_city:
                 return f"{m_psc_city.group(1)} {m_psc_city.group(2)}"
 
-            parts = [x for x in (ulice, psc) if x]
-            if parts:
-                return " ".join(parts)
+            if obec and psc:
+                return f"{psc} {obec}"
+            if obec:
+                return obec
+            if ulice and psc:
+                return f"{ulice}, {psc}"
 
-            okres_obj = addr.get("okres") if isinstance(addr.get("okres"), dict) else {}
-            ok_id = str(okres_obj.get("id") or "").strip()
-            if ok_id in OKRES_ID_MAP:
-                return OKRES_ID_MAP[ok_id]
-
-    okresy = mv_prace.get("okresy")
-    if isinstance(okresy, list):
-        for ok in okresy:
-            if isinstance(ok, dict):
-                ok_id = str(ok.get("id") or "").strip()
-                if ok_id in OKRES_ID_MAP:
-                    return OKRES_ID_MAP[ok_id]
+    if allowed_okres_names:
+        return allowed_okres_names[0]
 
     return ""
 
@@ -534,11 +564,13 @@ async def _fetch_mpsv_offers(term: str, location: str, limit: int = 25) -> List[
         if not title:
             continue
 
+        lok_val = _extract_mpsv_locality(row)
+        if lok_val == "__OUT_OF_REGION__":
+            continue
+
         emp = row.get("zamestnavatel") if isinstance(row.get("zamestnavatel"), dict) else {}
         company_name = str(emp.get("nazev") or "").strip() or "uradprace.cz"
-
         info = _extract_mpsv_str(row.get("upresnujiciInformace"))
-        lok_val = _extract_mpsv_locality(row)
 
         mzda_od = row.get("mesicniMzdaOd")
         mzda_do = row.get("mesicniMzdaDo")
@@ -737,6 +769,8 @@ async def _resolve_offer_commute(
     allow_company_guess: bool = True,
 ) -> Tuple[Optional[int], Optional[float], Optional[str]]:
     if home_lat is None or home_lon is None:
+        return None, None, None
+    if DISTANT_REGION_RE.search(offer_text or "") or DISTANT_PSC_RE.search(offer_text or ""):
         return None, None, None
     loc = _extract_best_locality(
         offer_text,

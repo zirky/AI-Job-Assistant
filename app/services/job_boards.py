@@ -58,6 +58,14 @@ AGENCY_NAME_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+DISTANT_REGION_RE = re.compile(
+    r"\b(?:hl\.\s*m\.\s*praha|praha\s*[1-9]?|st[řr]edo[čc]esk[ýy]\s+kraj|nupaky|"
+    r"karlovarsk[ýy]\s+kraj|doln[íi]\s+rychnov|cheb|sokolov|karlovy\s+vary|"
+    r"[úu]steck[ýy]\s+kraj|libereck[ýy]\s+kraj|kr[áa]lov[ée]hradeck[ýy]\s+kraj|"
+    r"pardubick[ýy]\s+kraj|jiho[čc]esk[ýy]\s+kraj|plze[ňn]sk[ýy]\s+kraj|vyso[čc]ina)\b",
+    flags=re.IGNORECASE,
+)
+
 
 def _log(msg: str) -> None:
     print(f"[job_boards] {msg}", file=sys.stdout, flush=True)
@@ -117,6 +125,11 @@ def _extract_place_fallback(text: str) -> Optional[str]:
         return explicit
     if not text:
         return None
+
+    m_distant = DISTANT_REGION_RE.search(text)
+    if m_distant:
+        return m_distant.group(0).strip()
+
     m = re.search(
         r"\b(?:v|ve|do|z|ze|u|okres)\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+(?:\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)?)\b",
         text,
@@ -670,9 +683,10 @@ async def _fetch_board_search(board: str, url: str) -> List[Dict[str, str]]:
     return found
 
 
-async def _enrich_offer_detail(item: Dict[str, str]) -> Dict[str, str]:
-    """Pokud se ze seznamu nepodařilo zjistit firmu, zkusí ji vytáhnout z detailu inzerátu."""
-    if item.get("company_name", "").lower() not in BOARD_NAMES:
+async def _enrich_offer_detail(item: Dict[str, str], force_detail: bool = False) -> Dict[str, str]:
+    """Doplní firmu nebo detailnější popis/lokalitu z detailu inzerátu."""
+    needs_company = item.get("company_name", "").lower() in BOARD_NAMES
+    if not needs_company and not force_detail:
         return item
     url = item.get("url", "")
     if not url:
@@ -688,7 +702,10 @@ async def _enrich_offer_detail(item: Dict[str, str]) -> Dict[str, str]:
         ld_comp = ld_items[0].get("company_name", "")
         if ld_comp and ld_comp.lower() not in BOARD_NAMES:
             item["company_name"] = ld_comp
-        if len(ld_items[0].get("description", "")) > len(item.get("description", "")):
+        ld_loc = _extract_json_ld_locality(soup)
+        if ld_loc:
+            item["description"] = f"Lokalita: {ld_loc}. {ld_items[0].get('description', '')}".strip()
+        elif len(ld_items[0].get("description", "")) > len(item.get("description", "")):
             item["description"] = ld_items[0]["description"]
         return item
 
@@ -856,12 +873,26 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                     url=offer_url,
                     allow_company_guess=(board != "linkedin.com"),
                 )
-                if board == "linkedin.com" and home_lat is not None and home_lon is not None:
+
+                if (not resolved_loc or c_km is None) and board in {"jobs.cz", "prace.cz", "jenprace.cz"}:
+                    item = await _enrich_offer_detail(item, force_detail=True)
+                    desc = item.get("description", "").strip()
+                    combined_text = f"{title} {desc} {company_name} {offer_url}"
+                    c_min, c_km, resolved_loc = await _resolve_offer_commute(
+                        combined_text,
+                        home_lat,
+                        home_lon,
+                        company_name=company_name,
+                        url=offer_url,
+                        allow_company_guess=False,
+                    )
+
+                if home_lat is not None and home_lon is not None:
                     if not resolved_loc or c_km is None:
                         continue
-                if c_min is not None and c_min > (max_min + 10):
+                if c_min is not None and c_min > max_min:
                     continue
-                if c_km is not None and float(c_km) > (max_km + 10.0):
+                if c_km is not None and float(c_km) > max_km:
                     continue
 
                 agency_flag = 1 if _is_agency_offer(company_name, title, desc) else 0

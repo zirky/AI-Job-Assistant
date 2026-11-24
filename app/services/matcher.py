@@ -51,6 +51,14 @@ def _get_gemini_model() -> str:
     return (getattr(settings, "gemini_model", None) or os.getenv("GEMINI_MODEL") or "gemini-3.1-flash-lite").strip()
 
 
+def _get_ollama_url() -> str:
+    return (getattr(settings, "ollama_base_url", None) or os.getenv("OLLAMA_BASE_URL") or "").strip().rstrip("/")
+
+
+def _get_ollama_model() -> str:
+    return (getattr(settings, "ollama_model", None) or os.getenv("OLLAMA_MODEL") or "qwen3:1.7b").strip()
+
+
 def _candidate_models() -> List[str]:
     models: List[str] = []
     primary = (getattr(settings, "llm_model", None) or os.getenv("LLM_MODEL") or "").strip()
@@ -252,14 +260,41 @@ async def _call_gemini_direct(prompt: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+async def _call_ollama(prompt: str) -> Optional[Dict[str, Any]]:
+    base_url = _get_ollama_url()
+    if not base_url:
+        return None
+    model = _get_ollama_model()
+    url = f"{base_url}/api/chat"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Odpovídej výhradně validním JSON objektem bez markdownu."},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "options": {
+            "temperature": 0.2,
+            "num_predict": 900,
+        },
+    }
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        content = ((data.get("message") or {}).get("content")) or ""
+        return _parse_eval_payload(_extract_json_obj(content))
+
+
 async def _llm_evaluation(offer: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     api_key = (getattr(settings, "llm_api_key", None) or os.getenv("LLM_API_KEY") or "").strip()
     if api_key == "vas_api_klic_zde":
         api_key = ""
     base_url = (getattr(settings, "llm_api_base", None) or os.getenv("LLM_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
     gemini_key = _get_gemini_key()
+    ollama_url = _get_ollama_url()
 
-    if not api_key and not gemini_key:
+    if not api_key and not gemini_key and not ollama_url:
         return _heuristic_evaluation(offer, profile)
 
     prompt = _build_prompt(offer, profile)
@@ -318,6 +353,16 @@ async def _llm_evaluation(offer: Dict[str, Any], profile: Dict[str, Any]) -> Dic
             except Exception as exc:
                 _log(f"Chyba u modelu {model_name} ({type(exc).__name__}: {_sanitize_error_text(exc)}), zkouším další model.")
 
+    if ollama_url:
+        try:
+            _log(f"Zkouším záložní lokální model '{_get_ollama_model()}' v Ollamě.")
+            oll_res = await _call_ollama(prompt)
+            if oll_res:
+                return oll_res
+            _log("Ollama nevrátila validní JSON payload.")
+        except Exception as exc:
+            _log(f"Záložní Ollama selhala ({type(exc).__name__}: {_sanitize_error_text(exc)}).")
+
     if hit_rate_limit:
         raise RateLimitError("Všechny dostupné modely vrátily 429 Too Many Requests.")
 
@@ -325,9 +370,9 @@ async def _llm_evaluation(offer: Dict[str, Any], profile: Dict[str, Any]) -> Dic
     return _heuristic_evaluation(offer, profile)
 
 
-async def evaluate_pending_offers(limit: int = 50) -> int:
+async def _evaluate_for_user(uid: int, limit: int) -> int:
     with db_session() as conn:
-        profile_row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        profile_row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
         if not profile_row:
             return 0
         profile = dict(profile_row)
@@ -340,9 +385,10 @@ async def evaluate_pending_offers(limit: int = 50) -> int:
                        COALESCE(j.commute_minutes, c.commute_minutes) AS effective_commute_min,
                        COALESCE(j.commute_km, c.commute_km) AS effective_commute_km
                 FROM job_offers j
-                LEFT JOIN companies c ON c.id = j.company_id
+                LEFT JOIN companies c ON c.id = j.company_id AND c.user_id = j.user_id
                 LEFT JOIN job_evaluations e ON e.job_id = j.id
-                WHERE j.status != 'hidden'
+                WHERE j.user_id = ?
+                  AND j.status != 'hidden'
                   AND (e.job_id IS NULL OR e.evaluated_hash != j.content_hash)
                 ORDER BY
                     CASE
@@ -353,7 +399,7 @@ async def evaluate_pending_offers(limit: int = 50) -> int:
                     j.first_seen_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (uid, limit),
             ).fetchall()
         ]
 
@@ -364,7 +410,7 @@ async def evaluate_pending_offers(limit: int = 50) -> int:
         try:
             res = await _llm_evaluation(offer, profile)
         except RateLimitError:
-            _log("Dosažen rate limit (429), zbytek dávky odkládám na další běh.")
+            _log(f"Dosažen rate limit (429) u uživatele {uid}, zbytek dávky odkládám na další běh.")
             break
         with db_session() as conn:
             conn.execute(
@@ -393,5 +439,20 @@ async def evaluate_pending_offers(limit: int = 50) -> int:
             )
         evaluated_count += 1
 
-    _log(f"Vyhodnoceno nabídek: {evaluated_count}")
+    _log(f"Vyhodnoceno nabídek (user_id={uid}): {evaluated_count}")
     return evaluated_count
+
+
+async def evaluate_pending_offers(limit: int = 50, user_id: Optional[int] = None) -> int:
+    if user_id is not None:
+        return await _evaluate_for_user(int(user_id), limit)
+
+    with db_session() as conn:
+        user_ids = [int(r["id"]) for r in conn.execute("SELECT id FROM users ORDER BY id ASC").fetchall()]
+    if not user_ids:
+        user_ids = [1]
+
+    total = 0
+    for uid in user_ids:
+        total += await _evaluate_for_user(uid, limit)
+    return total

@@ -10,6 +10,13 @@
 </article>
 {% endif %}
 
+{% if new_invite %}
+<article style="border-left: 4px solid #2ea043;">
+  Nový jednorázový pozvánkový kód: <strong>{{ new_invite }}</strong><br />
+  <small>Odkaz pro registraci: <code>/register?invite={{ new_invite }}</code></small>
+</article>
+{% endif %}
+
 {% if cleaned_count is defined and cleaned_count is not none %}
 <article style="border-left: 4px solid #2ea043;">
   Z databáze bylo smazáno starých neaktivních nabídek: <strong>{{ cleaned_count }}</strong>.
@@ -95,6 +102,22 @@
         JenPráce.cz
       </label>
       <label>
+        <input type="checkbox" name="use_dobraprace_cz" value="1" {% if profile.use_dobraprace_cz %}checked{% endif %} />
+        DobráPráce.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_profesia_cz" value="1" {% if profile.use_profesia_cz %}checked{% endif %} />
+        Profesia.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_kariera_cz" value="1" {% if profile.use_kariera_cz %}checked{% endif %} />
+        Kariéra.cz
+      </label>
+      <label>
+        <input type="checkbox" name="use_pracezarohem_cz" value="1" {% if profile.use_pracezarohem_cz %}checked{% endif %} />
+        Práce za rohem
+      </label>
+      <label>
         <input type="checkbox" name="use_linkedin" value="1" {% if profile.use_linkedin %}checked{% endif %} />
         LinkedIn
       </label>
@@ -135,6 +158,20 @@
     {% endif %}
   </fieldset>
 
+  <fieldset>
+    <legend>Vlastní AI API klíč (volitelné)</legend>
+    <label>
+      Vlastní API klíč (Gemini nebo OpenRouter – prázdné = použije se sdílený klíč ze serveru)
+      <input
+        type="password"
+        name="custom_llm_api_key"
+        value="{{ profile.custom_llm_api_key or '' }}"
+        placeholder="ponechte prázdné pro výchozí klíč ze serveru"
+        autocomplete="off"
+      />
+    </label>
+  </fieldset>
+
   <label>
     Vlastní klíčová slova / obory pro hledání (oddělené čárkou nebo novým řádkem)
     <textarea name="search_keywords" rows="2" placeholder="např. seřizovač, údržbář, provozní zámečník – AI doplní příbuzné profese dle CV">{{ profile.search_keywords or '' }}</textarea>
@@ -161,5 +198,44 @@
     <button type="submit" class="secondary">Odeslat testovací e-mailový výpis nyní</button>
   </form>
 </div>
+
+<article style="margin-top: 2rem;">
+  <h3>Pozvánky pro nové účty</h3>
+  <p><small>Každý vygenerovaný kód lze použít pouze jednou. V `.env` můžete mít <code>ALLOW_REGISTRATION=false</code>.</small></p>
+  <form method="post" action="/invites/create" style="margin-bottom: 1rem;">
+    <button type="submit">Vygenerovat novou pozvánku</button>
+  </form>
+
+  {% if invites %}
+  <table>
+    <thead>
+      <tr>
+        <th>Kód</th>
+        <th>Odkaz</th>
+        <th>Stav</th>
+        <th>Vytvořeno</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in invites %}
+      <tr>
+        <td><code>{{ inv.code }}</code></td>
+        <td><code>/register?invite={{ inv.code }}</code></td>
+        <td>
+          {% if inv.used_by_user_id %}
+            Použito ({{ inv.used_by_username or 'uživatel' }}, {{ inv.used_at or '' }})
+          {% else %}
+            <strong>Volná</strong>
+          {% endif %}
+        </td>
+        <td><small>{{ inv.created_at or '' }}</small></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <small>Zatím nebyly vytvořeny žádné pozvánky.</small>
+  {% endif %}
+</article>
 
 {% endblock %}

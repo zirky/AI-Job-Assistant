@@ -52,12 +52,17 @@ def _is_email_digest_due(profile: Dict[str, Any], now_utc: datetime) -> bool:
     return (now_utc - last_sent) >= timedelta(hours=20)
 
 
-def _fetch_digest_offers(profile: Dict[str, Any], since_utc: Optional[datetime], force: bool) -> List[Dict[str, Any]]:
+def _fetch_digest_offers(
+    uid: int,
+    profile: Dict[str, Any],
+    since_utc: Optional[datetime],
+    force: bool,
+) -> List[Dict[str, Any]]:
     _ensure_notified_column()
     min_score = int(profile.get("email_min_score") or 0)
     max_km = profile.get("max_commute_km")
 
-    params: List[Any] = [min_score]
+    params: List[Any] = [uid, min_score]
     unnotified_sql = "" if force else " AND j.notified_at IS NULL "
 
     since_sql = ""
@@ -78,9 +83,10 @@ def _fetch_digest_offers(profile: Dict[str, Any], since_utc: Optional[datetime],
                    j.is_agency, j.commute_minutes, j.commute_km, j.first_seen_at,
                    COALESCE(e.match_score, 0) AS match_score, e.pros, e.cons
             FROM job_offers j
-            LEFT JOIN companies c ON c.id = j.company_id
+            LEFT JOIN companies c ON c.id = j.company_id AND c.user_id = j.user_id
             LEFT JOIN job_evaluations e ON e.job_id = j.id
-            WHERE j.status != 'hidden'
+            WHERE j.user_id = ?
+              AND j.status != 'hidden'
               AND COALESCE(e.match_score, 0) >= ?
               {unnotified_sql}
               {since_sql}
@@ -125,9 +131,9 @@ def _send_smtp_email(recipient: str, subject: str, plain_body: str, html_body: s
         server.send_message(msg)
 
 
-async def maybe_send_email_digest(force: bool = False) -> bool:
+async def _send_digest_for_user(uid: int, force: bool = False) -> bool:
     with db_session() as conn:
-        row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
         if not row:
             return False
         profile = dict(row)
@@ -138,7 +144,7 @@ async def maybe_send_email_digest(force: bool = False) -> bool:
 
     recipient = (profile.get("email_recipient") or "").strip()
     if not recipient or "@" not in recipient:
-        _log("E-mailový digest je zapnutý, ale chybí platný cílový e-mail.")
+        _log(f"E-mailový digest (user_id={uid}) je zapnutý, ale chybí platný cílový e-mail.")
         return False
 
     if not (getattr(settings, "smtp_host", "") or "").strip():
@@ -156,9 +162,9 @@ async def maybe_send_email_digest(force: bool = False) -> bool:
         days_back = 7 if freq == "weekly" else 1
         since_utc = now_utc - timedelta(days=days_back)
 
-    offers = _fetch_digest_offers(profile, since_utc=since_utc, force=force)
+    offers = _fetch_digest_offers(uid, profile, since_utc=since_utc, force=force)
     if not offers and not force:
-        _log(f"Žádné nové nabídky pro {freq} e-mailový výpis, e-mail se neposílá.")
+        _log(f"Žádné nové nabídky pro {freq} e-mailový výpis (user_id={uid}), e-mail se neposílá.")
         return False
 
     label_cz = "týdenní" if freq == "weekly" else "denní"
@@ -209,21 +215,37 @@ async def maybe_send_email_digest(force: bool = False) -> bool:
     try:
         await asyncio.to_thread(_send_smtp_email, recipient, subject, plain_body, html_body)
     except Exception as exc:
-        _log(f"Chyba při odesílání e-mailu na {recipient}: {type(exc).__name__}: {exc}")
+        _log(f"Chyba při odesílání e-mailu na {recipient} (user_id={uid}): {type(exc).__name__}: {exc}")
         return False
 
     now_utc_iso = now_utc.strftime("%Y-%m-%d %H:%M:%S")
     offer_ids = [int(o["id"]) for o in offers if o.get("id") is not None]
     with db_session() as conn:
         conn.execute(
-            "UPDATE user_profile SET last_email_digest_at = ? WHERE id = 1",
-            (now_utc_iso,),
+            "UPDATE user_profile SET last_email_digest_at = ? WHERE user_id = ?",
+            (now_utc_iso, uid),
         )
         if offer_ids:
             placeholders = ",".join("?" for _ in offer_ids)
             conn.execute(
-                f"UPDATE job_offers SET notified_at = ? WHERE id IN ({placeholders})",
-                [now_utc_iso, *offer_ids],
+                f"UPDATE job_offers SET notified_at = ? WHERE user_id = ? AND id IN ({placeholders})",
+                [now_utc_iso, uid, *offer_ids],
             )
-    _log(f"Odeslán {label_cz} e-mailový digest ({len(offers)} nabídek) na {recipient}.")
+    _log(f"Odeslán {label_cz} e-mailový digest ({len(offers)} nabídek) na {recipient} (user_id={uid}).")
     return True
+
+
+async def maybe_send_email_digest(force: bool = False, user_id: Optional[int] = None) -> bool:
+    if user_id is not None:
+        return await _send_digest_for_user(int(user_id), force=force)
+
+    with db_session() as conn:
+        user_ids = [int(r["id"]) for r in conn.execute("SELECT id FROM users ORDER BY id ASC").fetchall()]
+    if not user_ids:
+        user_ids = [1]
+
+    any_sent = False
+    for uid in user_ids:
+        if await _send_digest_for_user(uid, force=force):
+            any_sent = True
+    return any_sent

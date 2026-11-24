@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<article style="max-width: 440px; margin: 2rem auto;">
+  <h2>Registrace na pozvánku</h2>
+
+  {% if error %}
+  <article style="border-left: 4px solid #cf222e;">
+    {{ error }}
+  </article>
+  {% endif %}
+
+  <form method="post" action="/register">
+    <label>
+      Uživatelské jméno
+      <input
+        type="text"
+        name="username"
+        value="{{ username or '' }}"
+        minlength="2"
+        maxlength="60"
+        required
+        autofocus
+      />
+    </label>
+    <label>
+      Heslo (min. 6 znaků)
+      <input type="password" name="password" minlength="6" required />
+    </label>
+    <label>
+      Potvrzení hesla
+      <input type="password" name="password_confirm" minlength="6" required />
+    </label>
+    <label>
+      Pozvánkový kód
+      <input
+        type="text"
+        name="invite_code"
+        value="{{ invite_code or '' }}"
+        placeholder="zadejte kód z pozvánky"
+        autocomplete="off"
+        required
+      />
+    </label>
+    <button type="submit">Založit účet</button>
+  </form>
+
+  <p style="margin-top: 1rem;">
+    <small>Už máte účet? <a href="/login">Přihlásit se</a></small>
+  </p>
+</article>
+{% endblock %}

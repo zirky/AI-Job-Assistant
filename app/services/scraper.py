@@ -283,7 +283,8 @@ async def fetch_company_offers(company: Dict[str, Any]) -> List[Dict[str, str]]:
     return offers
 
 
-async def run_scrape_cycle() -> Dict[str, int]:
+async def run_scrape_cycle(user_id: int = 1) -> Dict[str, int]:
+    uid = int(user_id)
     stats = {"companies_checked": 0, "new_offers": 0, "errors": 0}
     with db_session() as conn:
         companies = [
@@ -291,10 +292,11 @@ async def run_scrape_cycle() -> Dict[str, int]:
             for r in conn.execute(
                 """
                 SELECT * FROM companies
-                WHERE is_active = 1 AND is_blacklisted = 0
+                WHERE user_id = ? AND is_active = 1 AND is_blacklisted = 0
                   AND scraper_type != 'manual' AND TRIM(career_url) != ''
                 ORDER BY commute_minutes ASC NULLS LAST, id ASC
-                """
+                """,
+                (uid,),
             ).fetchall()
         ]
 
@@ -315,22 +317,26 @@ async def run_scrape_cycle() -> Dict[str, int]:
                     content_hash = hashlib.sha256(
                         f"{title.lower()}|{offer_url.lower()}|{desc[:300].lower()}".encode("utf-8")
                     ).hexdigest()
-                    existing = conn.execute("SELECT id FROM job_offers WHERE url = ?", (offer_url,)).fetchone()
+                    existing = conn.execute(
+                        "SELECT id FROM job_offers WHERE url = ? AND user_id = ?",
+                        (offer_url, uid),
+                    ).fetchone()
                     if existing:
                         conn.execute(
-                            "UPDATE job_offers SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (existing["id"],),
+                            "UPDATE job_offers SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                            (existing["id"], uid),
                         )
                         continue
                     agency_flag = 1 if (_is_agency(comp_name) or _is_agency(title) or _is_agency(desc)) else 0
                     conn.execute(
                         """
                         INSERT INTO job_offers (
-                            company_id, company_name_raw, title, url, source_type,
+                            user_id, company_id, company_name_raw, title, url, source_type,
                             is_agency, commute_minutes, commute_km, description_clean, content_hash, status
-                        ) VALUES (?, ?, ?, ?, 'direct_company', ?, ?, ?, ?, ?, 'new')
+                        ) VALUES (?, ?, ?, ?, ?, 'direct_company', ?, ?, ?, ?, ?, 'new')
                         """,
                         (
+                            uid,
                             comp_id,
                             comp_name,
                             title,
@@ -348,22 +354,22 @@ async def run_scrape_cycle() -> Dict[str, int]:
                     """
                     UPDATE companies
                     SET last_status = ?, last_checked_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                     """,
-                    (f"OK ({added_for_comp} nových)", comp_id),
+                    (f"OK ({added_for_comp} nových)", comp_id, uid),
                 )
         except Exception as exc:
             stats["errors"] += 1
-            _log(f"Chyba při sběru pro '{comp_name}' ({comp.get('career_url')}): {type(exc).__name__}: {exc}")
+            _log(f"Chyba při sběru pro '{comp_name}' ({comp.get('career_url')}, user_id={uid}): {type(exc).__name__}: {exc}")
             with db_session() as conn:
                 conn.execute(
                     """
                     UPDATE companies
                     SET last_status = ?, last_checked_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                     """,
-                    (f"Chyba: {type(exc).__name__}", comp_id),
+                    (f"Chyba: {type(exc).__name__}", comp_id, uid),
                 )
 
-    _log(f"Dokončen sběr: {stats}")
+    _log(f"Dokončen sběr (user_id={uid}): {stats}")
     return stats

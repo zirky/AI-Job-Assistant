@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<article style="max-width: 440px; margin: 2rem auto;">
+  <h2>Přihlášení</h2>
+
+  {% if registered %}
+  <article style="border-left: 4px solid #2ea043;">
+    Účet byl vytvořen. Nyní se můžete přihlásit.
+  </article>
+  {% endif %}
+
+  {% if error %}
+  <article style="border-left: 4px solid #cf222e;">
+    {{ error }}
+  </article>
+  {% endif %}
+
+  <form method="post" action="/login">
+    <label>
+      Uživatelské jméno
+      <input
+        type="text"
+        name="username"
+        value="{{ username or '' }}"
+        required
+        autofocus
+      />
+    </label>
+    <label>
+      Heslo
+      <input type="password" name="password" required />
+    </label>
+    <button type="submit">Přihlásit se</button>
+  </form>
+
+  <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid rgba(128, 128, 128, 0.25);">
+    <small>
+      Máte pozvánku?
+      {% if allow_registration %}
+      <a href="/register">Registrovat na pozvánku</a>
+      {% else %}
+      <span>Registrace na pozvánku není aktuálně povolena.</span>
+      {% endif %}
+    </small>
+  </div>
+</article>
+{% endblock %}

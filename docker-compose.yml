@@ -1,4 +1,3 @@
-
 services:
 
   job-assistant:
@@ -21,3 +20,15 @@ services:
 
       - ./data:/app/data
 
+    networks:
+
+      - default
+
+      - cloudflared_net
+
+
+networks:
+
+  cloudflared_net:
+
+    external: true

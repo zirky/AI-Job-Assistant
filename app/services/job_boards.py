@@ -485,7 +485,10 @@ def _extract_mpsv_str(val: Any, lang: str = "cs") -> str:
 def _extract_mpsv_locality(row: Dict[str, Any]) -> str:
     mv_prace = row.get("mistoVykonuPrace") if isinstance(row.get("mistoVykonuPrace"), dict) else {}
 
+<<<<<<< HEAD
     # 1. Kontrola okresů – pokud má nabídka zadané okresy a žádný není v našem okolí, rovnou ji vyřadíme
+=======
+>>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)
     okresy = mv_prace.get("okresy")
     allowed_okres_names: List[str] = []
     if isinstance(okresy, list) and okresy:
@@ -716,7 +719,10 @@ async def _fetch_board_search(board: str, url: str) -> List[Dict[str, str]]:
 
 
 async def _enrich_offer_detail(item: Dict[str, str], force_detail: bool = False) -> Dict[str, str]:
+<<<<<<< HEAD
     """Doplní firmu nebo detailnější popis/lokalitu z detailu inzerátu."""
+=======
+>>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)
     needs_company = item.get("company_name", "").lower() in BOARD_NAMES
     if not needs_company and not force_detail:
         return item
@@ -788,11 +794,12 @@ async def _resolve_offer_commute(
     return c_min, c_km, loc
 
 
-async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict[str, int]:
+async def run_job_boards_cycle(force_boards: Optional[List[str]] = None, user_id: int = 1) -> Dict[str, int]:
+    uid = int(user_id)
     stats = {"boards_queried": 0, "new_offers": 0, "skipped_duplicates": 0, "errors": 0}
 
     with db_session() as conn:
-        profile_row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        profile_row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
         if not profile_row:
             return stats
         profile = dict(profile_row)
@@ -813,14 +820,23 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                 enabled_boards.append("uradprace.cz")
 
         if not enabled_boards:
-            _log("Žádný pracovní portál není povolen.")
+            _log(f"Žádný pracovní portál není povolen (user_id={uid}).")
             return stats
 
-        existing_urls = {r["url"].strip().lower() for r in conn.execute("SELECT url FROM job_offers").fetchall()}
-        existing_hashes = {r["content_hash"] for r in conn.execute("SELECT content_hash FROM job_offers").fetchall()}
+        existing_urls = {
+            r["url"].strip().lower()
+            for r in conn.execute("SELECT url FROM job_offers WHERE user_id = ?", (uid,)).fetchall()
+        }
+        existing_hashes = {
+            r["content_hash"]
+            for r in conn.execute("SELECT content_hash FROM job_offers WHERE user_id = ?", (uid,)).fetchall()
+        }
         existing_keys = {
             _norm_key(r["title"], r["company_name_raw"]): r["id"]
-            for r in conn.execute("SELECT id, title, company_name_raw FROM job_offers").fetchall()
+            for r in conn.execute(
+                "SELECT id, title, company_name_raw FROM job_offers WHERE user_id = ?",
+                (uid,),
+            ).fetchall()
         }
 
     home_location = (profile.get("home_location") or "Bohumín").strip()
@@ -858,7 +874,7 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                 await asyncio.sleep(6.0)
             if last_err is not None and not raw_items:
                 stats["errors"] += 1
-                _log(f"Chyba u {board} ({term}): {type(last_err).__name__}: {_sanitize_err(last_err)}")
+                _log(f"Chyba u {board} ({term}, user_id={uid}): {type(last_err).__name__}: {_sanitize_err(last_err)}")
                 if board == "linkedin.com" and isinstance(last_err, httpx.HTTPStatusError) and last_err.response.status_code == 429:
                     _log("LinkedIn vrátil 429 (rate limit), přeskakuji zbývající dotazy pro LinkedIn v tomto běhu.")
                     break
@@ -936,11 +952,12 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                     cur = conn.execute(
                         """
                         INSERT INTO job_offers (
-                            company_id, company_name_raw, title, url, source_type, board_name,
+                            user_id, company_id, company_name_raw, title, url, source_type, board_name,
                             is_agency, commute_minutes, commute_km, description_clean, content_hash, status
-                        ) VALUES (NULL, ?, ?, ?, 'job_board', ?, ?, ?, ?, ?, ?, 'new')
+                        ) VALUES (?, NULL, ?, ?, ?, 'job_board', ?, ?, ?, ?, ?, ?, 'new')
                         """,
                         (
+                            uid,
                             company_name,
                             title,
                             offer_url,
@@ -957,5 +974,10 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None) -> Dict
                     existing_keys[n_key] = cur.lastrowid
                     stats["new_offers"] += 1
 
+<<<<<<< HEAD
     _log(f"Dokončen sběr z portálů: {stats}")
     return stats
+=======
+    _log(f"Dokončen sběr z portálů (user_id={uid}): {stats}")
+    return stats
+>>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)

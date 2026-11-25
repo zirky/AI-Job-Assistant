@@ -34,11 +34,13 @@
 
 </div>
 
-
-
 <hr />
 
-
+{% if profile and profile.is_paused %}
+<article style="border-left: 4px solid #d29922;">
+  <strong>Agent je pozastaven.</strong> Automatický sběr dat i zasílání přehledů jsou dočasně vypnuty – můžete to kdykoliv změnit v <a href="/settings">Nastavení</a>.
+</article>
+{% endif %}
 
 {% if scrape_summary %}
 
@@ -59,8 +61,6 @@
 </article>
 
 {% endif %}
-
-
 
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
 
@@ -91,8 +91,6 @@
   </div>
 
 </div>
-
-
 
 {% if offers %}
 

@@ -551,6 +551,7 @@ async def settings_page(
     digest_sent: int = 0,
     cleaned_count: int = -1,
     new_invite: str = "",
+    delete_error: str = "",
 ):
     user = _require_user(request)
     if not user:
@@ -578,6 +579,7 @@ async def settings_page(
             "saved": saved,
             "digest_sent": digest_sent,
             "cleaned_count": cleaned_count if cleaned_count >= 0 else None,
+            "delete_error": (delete_error or "").strip(),
             "llm_configured": bool(settings.llm_api_key and settings.llm_api_key != "vas_api_klic_zde"),
             "llm_model": settings.llm_model,
             "smtp_configured": bool(settings.smtp_host),
@@ -593,6 +595,7 @@ async def save_settings(
     max_commute_km: int = Form(20),
     min_salary: str = Form(""),
     digest_time: str = Form("07:30"),
+    is_paused: str = Form(""),
     custom_llm_api_key: str = Form(""),
     search_keywords: str = Form(""),
     negative_patterns: str = Form(""),
@@ -628,6 +631,7 @@ async def save_settings(
     settings.ensure_dirs()
     _user_cv_path(uid).write_text(clean_cv, encoding="utf-8")
 
+    b_paused = 1 if is_paused else 0
     b_jobs = 1 if use_jobs_cz else 0
     b_prace = 1 if use_prace_cz else 0
     b_jenprace = 1 if use_jenprace_cz else 0
@@ -648,12 +652,15 @@ async def save_settings(
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_profile)").fetchall()}
         if "custom_llm_api_key" not in cols:
             conn.execute("ALTER TABLE user_profile ADD COLUMN custom_llm_api_key TEXT;")
+        if "is_paused" not in cols:
+            conn.execute("ALTER TABLE user_profile ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0;")
 
         conn.execute(
             """
             UPDATE user_profile
             SET home_location = ?, home_lat = ?, home_lon = ?, max_commute_min = ?, max_commute_km = ?,
                 min_salary = ?, cv_text = ?, search_keywords = ?, negative_patterns = ?, digest_time = ?,
+                is_paused = ?,
                 use_jobs_cz = ?, use_prace_cz = ?, use_jenprace_cz = ?,
                 use_dobraprace_cz = ?, use_profesia_cz = ?, use_kariera_cz = ?, use_pracezarohem_cz = ?,
                 use_linkedin = ?, use_uradprace_cz = ?,
@@ -673,6 +680,7 @@ async def save_settings(
                 search_keywords.strip(),
                 negative_patterns.strip(),
                 digest_time.strip() or "07:30",
+                b_paused,
                 b_jobs,
                 b_prace,
                 b_jenprace,
@@ -704,6 +712,51 @@ async def save_settings(
                     (minutes, km, comp["id"], uid),
                 )
     return RedirectResponse(url="/settings?saved=1", status_code=303)
+
+
+@router.post("/settings/delete-account")
+async def delete_account(
+    request: Request,
+    confirm_username: str = Form(""),
+    confirm_permanent: str = Form(""),
+):
+    user = _require_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    expected_username = (user.get("username") or "").strip()
+    if not confirm_permanent or confirm_username.strip() != expected_username:
+        return RedirectResponse(
+            url="/settings?delete_error=Pro+smaz%C3%A1n%C3%AD+mus%C3%ADte+za%C5%A1krtnout+potvrzen%C3%AD+a+p%C5%99esn%C4%9B+opsat+sv%C3%A9+u%C5%BEivatelsk%C3%A9+jm%C3%A9no.",
+            status_code=303,
+        )
+
+    uid = int(user["id"])
+    with db_session() as conn:
+        target = conn.execute("SELECT id, is_admin FROM users WHERE id = ?", (uid,)).fetchone()
+        if not target:
+            return RedirectResponse(url="/login", status_code=303)
+        if int(target["is_admin"] or 0) == 1:
+            other_admins = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM users WHERE is_admin = 1 AND id != ?",
+                (uid,),
+            ).fetchone()
+            if not other_admins or int(other_admins["cnt"] or 0) == 0:
+                return RedirectResponse(
+                    url="/settings?delete_error=Posledn%C3%AD+administr%C3%A1torsk%C3%BD+%C3%BA%C4%8Det+nelze+smazat.",
+                    status_code=303,
+                )
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+
+    cv_file = _user_cv_path(uid)
+    try:
+        if cv_file.exists() and uid != 1:
+            cv_file.unlink()
+    except OSError:
+        pass
+
+    request.session.clear()
+    return RedirectResponse(url="/login?error=%C3%9A%C4%8Det+a+v%C5%A1echna+jeho+data+byla+smaz%C3%A1na.", status_code=303)
 
 
 @router.post("/settings/cleanup-now")

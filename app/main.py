@@ -29,10 +29,21 @@ def _bootstrap_users() -> None:
 async def run_scheduled_pipeline() -> None:
     async with _cycle_lock:
         with db_session() as conn:
-            user_rows = conn.execute("SELECT id FROM users ORDER BY id ASC").fetchall()
-        user_ids = [int(r["id"]) for r in user_rows] if user_rows else [1]
+            user_rows = conn.execute(
+                """
+                SELECT u.id, COALESCE(p.is_paused, 0) AS is_paused
+                FROM users u
+                LEFT JOIN user_profile p ON p.user_id = u.id
+                ORDER BY u.id ASC
+                """
+            ).fetchall()
 
-        for uid in user_ids:
+        active_user_ids = [int(r["id"]) for r in user_rows if not int(r["is_paused"] or 0)]
+        if not active_user_ids:
+            print("[scheduler] Všichni uživatelé mají agenta pozastaveného, plánovaný běh přeskočen.", flush=True)
+            return
+
+        for uid in active_user_ids:
             try:
                 delete_expired_offers(uid)
             except TypeError:
@@ -65,11 +76,16 @@ async def _daily_digest_loop() -> None:
 
             with db_session() as conn:
                 rows = conn.execute(
-                    "SELECT user_id, digest_time, last_digest_run_date FROM user_profile"
+                    """
+                    SELECT user_id, digest_time, last_digest_run_date, COALESCE(is_paused, 0) AS is_paused
+                    FROM user_profile
+                    """
                 ).fetchall()
 
             due_any = False
             for row in rows:
+                if int(row["is_paused"] or 0):
+                    continue
                 target_time = (row["digest_time"] or settings.default_digest_time or "07:30").strip()
                 last_run_date = (row["last_digest_run_date"] or "").strip()
                 if last_run_date != today_str and hhmm_str >= target_time:

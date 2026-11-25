@@ -4,9 +4,21 @@
 
 <h2>Profil, dojezd a CV</h2>
 
+{% if profile and profile.is_paused %}
+<article style="border-left: 4px solid #d29922;">
+  <strong>Agent je aktuálně pozastaven.</strong> Automatický sběr nabídek i zasílání souhrnných přehledů jsou dočasně vypnuty.
+</article>
+{% endif %}
+
 {% if saved %}
 <article style="border-left: 4px solid #2ea043;">
   Nastavení bylo uloženo a časy i vzdálenosti dojezdu byly aktualizovány.
+</article>
+{% endif %}
+
+{% if delete_error %}
+<article style="border-left: 4px solid #cf222e;">
+  {{ delete_error }}
 </article>
 {% endif %}
 
@@ -48,6 +60,14 @@
 </article>
 
 <form method="post" action="/settings">
+
+  <fieldset>
+    <legend>Režim agenta</legend>
+    <label>
+      <input type="checkbox" name="is_paused" value="1" {% if profile and profile.is_paused %}checked{% endif %} />
+      <strong>Pozastavit agenta</strong> – dočasně vypnout automatický sběr dat i zasílání přehledů (uložená data zůstanou zachována)
+    </label>
+  </fieldset>
 
   <div class="grid">
     <label>
@@ -236,6 +256,22 @@
   {% else %}
   <small>Zatím nebyly vytvořeny žádné pozvánky.</small>
   {% endif %}
+</article>
+
+<article style="margin-top: 2rem; border-left: 4px solid #cf222e;">
+  <h3>Smazání profilu a účtu</h3>
+  <p><small>Tato akce je nevratná. Smaže váš uživatelský účet, profil, sledované firmy, nalezené nabídky, hodnocení i uložené CV.</small></p>
+  <form method="post" action="/settings/delete-account" onsubmit="return confirm('Opravdu chcete trvale smazat svůj účet a všechna jeho data?');">
+    <label>
+      Pro potvrzení opište své uživatelské jméno (<strong>{{ current_user.username }}</strong>)
+      <input type="text" name="confirm_username" placeholder="{{ current_user.username }}" autocomplete="off" required />
+    </label>
+    <label>
+      <input type="checkbox" name="confirm_permanent" value="1" required />
+      Rozumím, že účet a všechna související data budou trvale smazána
+    </label>
+    <button type="submit" class="secondary">Trvale smazat účet a profil</button>
+  </form>
 </article>
 
 {% endblock %}

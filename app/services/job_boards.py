@@ -485,10 +485,7 @@ def _extract_mpsv_str(val: Any, lang: str = "cs") -> str:
 def _extract_mpsv_locality(row: Dict[str, Any]) -> str:
     mv_prace = row.get("mistoVykonuPrace") if isinstance(row.get("mistoVykonuPrace"), dict) else {}
 
-<<<<<<< HEAD
     # 1. Kontrola okresů – pokud má nabídka zadané okresy a žádný není v našem okolí, rovnou ji vyřadíme
-=======
->>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)
     okresy = mv_prace.get("okresy")
     allowed_okres_names: List[str] = []
     if isinstance(okresy, list) and okresy:
@@ -719,10 +716,7 @@ async def _fetch_board_search(board: str, url: str) -> List[Dict[str, str]]:
 
 
 async def _enrich_offer_detail(item: Dict[str, str], force_detail: bool = False) -> Dict[str, str]:
-<<<<<<< HEAD
     """Doplní firmu nebo detailnější popis/lokalitu z detailu inzerátu."""
-=======
->>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)
     needs_company = item.get("company_name", "").lower() in BOARD_NAMES
     if not needs_company and not force_detail:
         return item
@@ -974,10 +968,5 @@ async def run_job_boards_cycle(force_boards: Optional[List[str]] = None, user_id
                     existing_keys[n_key] = cur.lastrowid
                     stats["new_offers"] += 1
 
-<<<<<<< HEAD
-    _log(f"Dokončen sběr z portálů: {stats}")
-    return stats
-=======
     _log(f"Dokončen sběr z portálů (user_id={uid}): {stats}")
     return stats
->>>>>>> c635bf5 (Aktualizace aplikace: autentizace, konfigurace, databáze a webové rozhraní)

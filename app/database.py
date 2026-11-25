@@ -81,6 +81,7 @@ def _migrate_multi_user(conn: sqlite3.Connection) -> None:
                 search_keywords TEXT NOT NULL DEFAULT '',
                 negative_patterns TEXT NOT NULL DEFAULT '',
                 digest_time TEXT NOT NULL DEFAULT '07:30',
+                is_paused INTEGER NOT NULL DEFAULT 0,
                 use_jobs_cz INTEGER NOT NULL DEFAULT 0,
                 use_prace_cz INTEGER NOT NULL DEFAULT 0,
                 use_jenprace_cz INTEGER NOT NULL DEFAULT 0,
@@ -118,13 +119,14 @@ def _migrate_multi_user(conn: sqlite3.Connection) -> None:
                     INSERT OR IGNORE INTO user_profile_v2 (
                         user_id, home_location, home_lat, home_lon, max_commute_min, max_commute_km,
                         min_salary, cv_text, cv_skills_json, search_keywords, negative_patterns, digest_time,
+                        is_paused,
                         use_jobs_cz, use_prace_cz, use_jenprace_cz,
                         use_dobraprace_cz, use_profesia_cz, use_kariera_cz, use_pracezarohem_cz,
                         use_linkedin, use_uradprace_cz,
                         email_digest_enabled, email_digest_frequency, email_recipient, email_min_score,
                         min_display_score, auto_delete_days, last_digest_run_date, last_email_digest_at,
                         custom_llm_api_key, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uid,
@@ -139,6 +141,7 @@ def _migrate_multi_user(conn: sqlite3.Connection) -> None:
                         p.get("search_keywords") or "",
                         p.get("negative_patterns") or "",
                         p.get("digest_time") or "07:30",
+                        p.get("is_paused") or 0,
                         p.get("use_jobs_cz") or 0,
                         p.get("use_prace_cz") or 0,
                         p.get("use_jenprace_cz") or 0,
@@ -254,6 +257,7 @@ def init_db() -> None:
                 search_keywords TEXT NOT NULL DEFAULT '',
                 negative_patterns TEXT NOT NULL DEFAULT '',
                 digest_time TEXT NOT NULL DEFAULT '07:30',
+                is_paused INTEGER NOT NULL DEFAULT 0,
                 use_jobs_cz INTEGER NOT NULL DEFAULT 0,
                 use_prace_cz INTEGER NOT NULL DEFAULT 0,
                 use_jenprace_cz INTEGER NOT NULL DEFAULT 0,
@@ -332,6 +336,7 @@ def init_db() -> None:
             """
         )
         _migrate_multi_user(conn)
+        _ensure_column(conn, "user_profile", "is_paused", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "user_profile", "max_commute_km", "INTEGER NOT NULL DEFAULT 20")
         _ensure_column(conn, "user_profile", "search_keywords", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "user_profile", "use_jobs_cz", "INTEGER NOT NULL DEFAULT 0")
